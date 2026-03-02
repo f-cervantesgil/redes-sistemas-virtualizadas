@@ -135,11 +135,12 @@ function Configurar-AmbitoDHCP {
     $nombreAmbito = Read-Host "  Nombre del nuevo ambito (Ej. RedLocal)"
     $rangoIni = Ingresar-IP "  Rango Inicial para Clientes (Ej. 192.168.10.100)"
     $rangoFin = Ingresar-IP "  Rango Final para Clientes (Ej. 192.168.10.200)"
-    $mascara = Ingresar-IP "  Mascara Subred (Ej. 255.255.255.0)"
+    $mascara = Ingresar-IP "  Mascara Subred (Ej. 255.255.255.0) [Opciones: Enter para 255.255.255.0]" -Opcional
+    if ([string]::IsNullOrWhiteSpace($mascara)) { $mascara = "255.255.255.0" }
     $gateway = Ingresar-IP "  Puerta de Enlace (Router) [Opcional]" -Opcional
     $dns = Ingresar-IP "  Servidor DNS [Opcional]" -Opcional
-    $tiempo = Read-Host "  Tiempo de Concesion en dias (Enter para 8)"
-    if ([string]::IsNullOrWhiteSpace($tiempo)) { $tiempo = 8 }
+    $tiempo = Read-Host "  Tiempo de Concesion en SEGUNDOS (Ej: 86400. Enter por defecto a 691200)"
+    if ([string]::IsNullOrWhiteSpace($tiempo)) { $tiempo = 691200 }
 
     # Preguntar si fijar IP
     $fijar = Read-Host "Desea fijar una IP Base para el Servidor en $($iface.Name)? (S/N)"
@@ -160,12 +161,12 @@ function Configurar-AmbitoDHCP {
 
     Write-Host "[*] Registrando nuevo Ambito DHCP..."
     try {
-        $leaseSpan = New-TimeSpan -Days ([int]$tiempo)
+        $leaseSpan = New-TimeSpan -Seconds ([int]$tiempo)
         Add-DhcpServerv4Scope -Name $nombreAmbito -StartRange $rangoIni -EndRange $rangoFin -SubnetMask $mascara -LeaseDuration $leaseSpan -State Active -ErrorAction Stop
         
         $opciones = @{}
-        if ([bool]$gateway) { $opciones["Router"] = $gateway }
-        if ([bool]$dns) { $opciones["DnsServer"] = $dns }
+        if ([string]::IsNullOrWhiteSpace($gateway) -eq $false) { $opciones["Router"] = @($gateway) }
+        if ([string]::IsNullOrWhiteSpace($dns) -eq $false) { $opciones["DnsServer"] = @($dns) }
         
         if ($opciones.Count -gt 0) {
             $scopeNuevo = Get-DhcpServerv4Scope | Where-Object Name -eq $nombreAmbito
