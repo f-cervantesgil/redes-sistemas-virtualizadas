@@ -106,24 +106,28 @@ Function Add-FTPUsers {
 
         # Crear Usuario Local
         if (!(Get-LocalUser -Name $user -ErrorAction SilentlyContinue)) {
-            New-LocalUser -Name $user -Password $pass -FullName "FTP User $user" -Description "Usuario Practica 05"
-            Add-LocalGroupMember -Group $targetGroup -Member $user
-            Add-LocalGroupMember -Group "Users" -Member $user
-        }
+            try {
+                New-LocalUser -Name $user -Password $pass -FullName "FTP User $user" -Description "Usuario Practica 05" -ErrorAction Stop | Out-Null
+                Add-LocalGroupMember -Group $targetGroup -Member $user -ErrorAction SilentlyContinue
+                Add-LocalGroupMember -Group "Users" -Member $user -ErrorAction SilentlyContinue
+                
+                # Solo si el usuario se creo bien, hacemos las carpetas
+                $userRoot = "C:\ftp_root\LocalUser\$user"
+                if (!(Test-Path $userRoot)) {
+                    New-Item -ItemType Directory -Path $userRoot -Force | Out-Null
+                }
+                
+                $juncGeneral = Join-Path $userRoot "general"
+                $juncGroup = Join-Path $userRoot $targetGroup
+                
+                if (!(Test-Path $juncGeneral)) { cmd /c mklink /j "$juncGeneral" "C:\ftp_root\general" }
+                if (!(Test-Path $juncGroup)) { cmd /c mklink /j "$juncGroup" "C:\ftp_root\grupos\$targetGroup" }
 
-        # Estructura de carpetas del usuario
-        $userRoot = "C:\ftp_root\LocalUser\$user"
-        if (!(Test-Path $userRoot)) {
-            New-Item -ItemType Directory -Path $userRoot -Force | Out-Null
+                Write-Host "[+] Usuario $user configurado y mapeado a $targetGroup" -ForegroundColor Green
+            } catch {
+                Write-Host "[-] ERROR: Windows rechazo la contraseña para $user. Use una mas compleja (Ej: Clave.123)" -ForegroundColor Red
+            }
         }
-        
-        $juncGeneral = Join-Path $userRoot "general"
-        $juncGroup = Join-Path $userRoot $targetGroup
-        
-        if (!(Test-Path $juncGeneral)) { cmd /c mklink /j "$juncGeneral" "C:\ftp_root\general" }
-        if (!(Test-Path $juncGroup)) { cmd /c mklink /j "$juncGroup" "C:\ftp_root\grupos\$targetGroup" }
-
-        Write-Host "[+] Usuario $user configurado y mapeado a $targetGroup" -ForegroundColor Green
     }
 }
 
