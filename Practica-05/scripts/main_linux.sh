@@ -22,6 +22,13 @@ install_vsftpd() {
     else
         echo "[!] vsftpd ya esta instalado."
     fi
+
+    # ASEGURAR QUE /sbin/nologin SEA UN SHELL VALIDO
+    # Esto es vital para evitar el error 530 Login Incorrect
+    if ! grep -q "/sbin/nologin" /etc/shells; then
+        echo "/sbin/nologin" >> /etc/shells
+        echo "[*] /sbin/nologin agregado a /etc/shells."
+    fi
 }
 
 # 2. Configuracion Base del Sistema
@@ -83,10 +90,11 @@ dirmessage_enable=YES
 use_localtime=YES
 xferlog_enable=YES
 connect_from_port_20=YES
-chroot_local_user=YES
-allow_writeable_chroot=YES
 secure_chroot_dir=/var/run/vsftpd/empty
+
+# Configuracion de Autenticacion
 pam_service_name=vsftpd
+check_shell=NO
 
 # Personalización Raíz
 no_anon_password=YES
@@ -120,16 +128,8 @@ add_ftp_users() {
     for (( i=1; i<=$num; i++ ))
     do
         read -p "Nombre del usuario $i: " username
-        # Validar contraseña de exactamente 8 caracteres
-        while true; do
-            read -s -p "Contraseña para $username (debe ser de 8 caracteres): " password
-            echo ""
-            if [ ${#password} -eq 8 ]; then
-                break
-            else
-                echo "[-] ERROR: La contraseña debe tener exactamente 8 caracteres. Intente de nuevo."
-            fi
-        done
+        read -s -p "Contraseña para $username: " password
+        echo ""
 
         # Seleccione Grupo
         echo "Seleccione Grupo (1: reprobados, 2: recursadores): "
@@ -207,7 +207,33 @@ change_group() {
     fi
 }
 
-# 6. Listar Usuarios Registrados
+# 6. Eliminar Usuario
+delete_user() {
+    read -p "Nombre del usuario a eliminar: " username
+    if id "$username" &>/dev/null; then
+        echo "[*] Eliminando usuario $username..."
+        
+        # Desmontar carpetas activas para evitar errores de Busy Device
+        USER_FTP="/home/$username/ftp"
+        umount -l "$USER_FTP/general" 2>/dev/null
+        umount -l "$USER_FTP/reprobados" 2>/dev/null
+        umount -l "$USER_FTP/recursadores" 2>/dev/null
+        umount -l "$USER_FTP/$username" 2>/dev/null
+
+        # Eliminar usuario y home
+        userdel -r "$username" 2>/dev/null
+        
+        # Limpiar carpeta física de archivos personal si existe
+        rm -rf "/srv/ftp/users/$username"
+        
+        echo "[+] Usuario $username eliminado correctamente."
+    else
+        echo "[-] Usuario no encontrado."
+    fi
+    read -p "Presione Enter para continuar..."
+}
+
+# 7. Listar Usuarios Registrados
 list_registered_users() {
     echo ""
     echo "[*] USUARIOS REGISTRADOS EN EL SISTEMA FTP"
@@ -228,31 +254,25 @@ list_registered_users() {
     read -p "Presione Enter para continuar..."
 }
 
-# 7. Login Simulado
+# 8. Login Simulado
 login_user() {
     echo ""
     echo "--- INICIO DE SESIÓN ---"
     read -p "Nombre de usuario: " username
     
     if id "$username" &>/dev/null; then
-        # Verificar si pertenece a nuestros grupos de la practica
         is_ftp_user=$(groups "$username" | grep -E "reprobados|recursadores")
         if [ -z "$is_ftp_user" ]; then
-            echo "[-] El usuario existe pero no es un usuario del sistema FTP de esta práctica."
+            echo "[-] El usuario existe pero no pertenece al sistema FTP."
             return
         fi
 
         read -s -p "Contraseña: " password
         echo ""
-        
-        
-        if [ ${#password} -eq 8 ]; then
-            echo "[+] ¡Login exitoso! Bienvenido, $username."
-            echo "[*] Tus carpetas FTP vinculadas:"
-            ls -F "/home/$username/ftp"
-        else
-            echo "[-] Contraseña incorrecta o formato inválido (debe ser de 8 caracteres)."
-        fi
+        # En una simulación, solo verificamos existencia y grupo
+        echo "[+] ¡Login exitoso! Bienvenido, $username."
+        echo "[*] Carpetas vinculadas:"
+        ls -F "/home/$username/ftp" 2>/dev/null
     else
         echo "[-] Usuario no encontrado."
     fi
@@ -266,11 +286,12 @@ while true; do
     echo "  ADMINISTRACION DE SERVIDOR FTP (LINUX MAGEIA)       "
     echo "===================================================="
     echo "1. Instalación e Instalacion de vsftpd"
-    echo "2. Alta Masiva de Usuarios "
+    echo "2. Alta Masiva de Usuarios"
     echo "3. Ver Usuarios Registrados"
     echo "4. Cambiar Grupo de Usuario"
-    echo "5. Login de Usuario (Simulado)"
-    echo "6. Salir"
+    echo "5. Borrar Usuario"
+    echo "6. Login de Usuario (Simulado)"
+    echo "7. Salir"
     echo "===================================================="
     read -p "Opcion: " opt
 
@@ -279,8 +300,9 @@ while true; do
         2) add_ftp_users ;;
         3) list_registered_users ;;
         4) change_group ;;
-        5) login_user ;;
-        6) echo "Saliendo..."; exit 0 ;;
+        5) delete_user ;;
+        6) login_user ;;
+        7) echo "Saliendo..."; exit 0 ;;
         *) echo "Opcion no valida."; sleep 1 ;;
     esac
 done

@@ -81,17 +81,8 @@ Function Add-FTPUsers {
     
     for ($i = 1; $i -le $n; $i++) {
         $user = Read-Host "Nombre para el usuario $i"
-        # Validar contraseña de exactamente 8 caracteres
-        $passString = ""
-        while ($true) {
-            $passString = Read-Host "Password para $user (deben ser 8 caracteres)"
-            if ($passString.Length -eq 8) {
-                $pass = ConvertTo-SecureString $passString -AsPlainText -Force
-                break
-            } else {
-                Write-Host "[-] ERROR: La contraseña debe tener exactamente 8 caracteres." -ForegroundColor Red
-            }
-        }
+        $passString = Read-Host "Password para $user"
+        $pass = ConvertTo-SecureString $passString -AsPlainText -Force
         
         $groupName = Read-Host "Grupo (1: reprobados, 2: recursadores)"
         $targetGroup = if ($groupName -eq "1") { "reprobados" } else { "recursadores" }
@@ -148,7 +139,29 @@ Function Change-UserGroup {
     }
 }
 
-# 6. Listar Usuarios Registrados
+# 6. Eliminar Usuario
+Function Remove-FTPUser {
+    $user = Read-Host "Cual usuario desea eliminar?"
+    if (Get-LocalUser -Name $user -ErrorAction SilentlyContinue) {
+        Write-Host "[*] Eliminando usuario $user..." -ForegroundColor Yellow
+        
+        # Eliminar Usuario y su carpeta de Home (Aislamiento IIS)
+        Remove-LocalUser -Name $user
+        $userRoot = "C:\ftp_root\LocalUser\$user"
+        if (Test-Path $userRoot) {
+            # Los junctions a veces dan problemas al borrar la carpeta padre directamente
+            Get-ChildItem $userRoot | Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
+            Remove-Item $userRoot -Force -Recurse
+        }
+
+        Write-Host "[+] Usuario y carpetas eliminados." -ForegroundColor Green
+    } else {
+        Write-Host "[-] Usuario no encontrado." -ForegroundColor Red
+    }
+    Read-Host "Presione Enter para continuar..."
+}
+
+# 7. Listar Usuarios Registrados
 Function Get-RegisteredFTPUsers {
     Write-Host ""
     Write-Host "[*] USUARIOS REGISTRADOS EN EL SISTEMA FTP" -ForegroundColor Cyan
@@ -167,32 +180,24 @@ Function Get-RegisteredFTPUsers {
     Read-Host "Presione Enter para continuar..."
 }
 
-# 7. Login Simulado
+# 8. Login Simulado
 Function Test-UserLogin {
     Write-Host ""
     Write-Host "--- INICIO DE SESIÓN ---" -ForegroundColor Cyan
     $user = Read-Host "Nombre de usuario"
     
     if (Get-LocalUser -Name $user -ErrorAction SilentlyContinue) {
-        # Verificar si es parte de los grupos involucrados
         $groups = Get-LocalGroup -Name reprobados, recursadores -ErrorAction SilentlyContinue | Get-LocalGroupMember -Member $user -ErrorAction SilentlyContinue
-        
         if ($null -eq $groups) {
-            Write-Host "[-] El usuario existe pero no pertenece a los grupos de la práctica." -ForegroundColor Red
+            Write-Host "[-] El usuario existe pero no pertenece al sistema FTP." -ForegroundColor Red
             return
         }
 
         $passString = Read-Host "Contraseña"
-        
-        # Simulación de validación (basada en longitud como en el script de Linux)
-        if ($passString.Length -eq 8) {
-            Write-Host "[+] ¡Login exitoso! Bienvenido, $user." -ForegroundColor Green
-            Write-Host "[*] Tus carpetas FTP vinculadas:"
-            if (Test-Path "C:\ftp_root\LocalUser\$user") {
-                Get-ChildItem -Path "C:\ftp_root\LocalUser\$user" | Select-Object Name
-            }
-        } else {
-            Write-Host "[-] Contraseña incorrecta o formato inválido (debe ser de 8 caracteres)." -ForegroundColor Red
+        Write-Host "[+] ¡Login exitoso! Bienvenido, $user." -ForegroundColor Green
+        Write-Host "[*] Tus carpetas FTP vinculadas:"
+        if (Test-Path "C:\ftp_root\LocalUser\$user") {
+            Get-ChildItem -Path "C:\ftp_root\LocalUser\$user" | Select-Object Name
         }
     } else {
         Write-Host "[-] Usuario no encontrado." -ForegroundColor Red
@@ -207,11 +212,12 @@ while ($true) {
     Write-Host "   PRACTICA 05: FTP AUTOMATION (WINDOWS SERVER)     " -ForegroundColor Cyan
     Write-Host "====================================================" -ForegroundColor Cyan
     Write-Host "1. Instalación y Configuración Inicial"
-    Write-Host "2. Alta Masiva de Usuarios (Password 8 chars)"
+    Write-Host "2. Alta Masiva de Usuarios"
     Write-Host "3. Ver Usuarios Registrados"
     Write-Host "4. Cambiar de Grupo a Usuario"
-    Write-Host "5. Login de Usuario (Simulado)"
-    Write-Host "6. Salir"
+    Write-Host "5. Eliminar Usuario"
+    Write-Host "6. Login de Usuario (Simulado)"
+    Write-Host "7. Salir"
     Write-Host "====================================================" -ForegroundColor Cyan
 
     $choice = Read-Host "Seleccione una opción"
@@ -224,8 +230,9 @@ while ($true) {
         }
         "3" { Get-RegisteredFTPUsers }
         "4" { Change-UserGroup }
-        "5" { Test-UserLogin }
-        "6" { Write-Host "Saliendo..."; exit }
+        "5" { Remove-FTPUser }
+        "6" { Test-UserLogin }
+        "7" { Write-Host "Saliendo..."; exit }
         Default { Write-Host "Opción no válida."; Start-Sleep -Seconds 1 }
     }
 }
