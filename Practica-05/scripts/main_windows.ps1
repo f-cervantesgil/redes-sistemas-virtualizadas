@@ -21,6 +21,17 @@ Function Install-FTPServer {
 Function Initialize-Environment {
     Write-Host "[*] Inicializando Grupos y Directorios..." -ForegroundColor Cyan
     
+    # RELAJAR POLITICAS DE CONTRASEÑA (Para permitir contraseñas simples como 1234)
+    Write-Host "[*] Relajando politicas de seguridad de contraseñas..." -ForegroundColor Yellow
+    $cfgFile = "$env:TEMP\pwd_policy.inf"
+    secedit /export /cfg $cfgFile /quiet
+    (Get-Content $cfgFile) | ForEach-Object {
+        $_ -replace "PasswordComplexity = 1", "PasswordComplexity = 0" `
+           -replace "MinimumPasswordLength = .*", "MinimumPasswordLength = 0"
+    } | Set-Content $cfgFile
+    secedit /configure /db "$env:TEMP\pwd.sdb" /cfg $cfgFile /areas SECURITYPOLICY /quiet
+    Remove-Item $cfgFile -ErrorAction SilentlyContinue
+
     # Crear Grupos
     $groups = @("reprobados", "recursadores")
     foreach ($g in $groups) {
