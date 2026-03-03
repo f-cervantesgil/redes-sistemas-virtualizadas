@@ -169,15 +169,26 @@ Function Get-RegisteredFTPUsers {
     Write-Host ""
     Write-Host "[*] USUARIOS REGISTRADOS EN EL SISTEMA FTP" -ForegroundColor Cyan
     Write-Host "------------------------------------------"
-    Write-Host "{0,-20} {1,-20}" -f "USUARIO", "GRUPO"
-    Write-Host "{0,-20} {1,-20}" -f "-------", "-----"
     
     $groups = @("reprobados", "recursadores")
+    $anyUser = $false
+
     foreach ($g in $groups) {
         $members = Get-LocalGroupMember -Group $g -ErrorAction SilentlyContinue
-        foreach ($m in $members) {
-            Write-Host "{0,-20} {1,-20}" -f $m.Name, $g
+        if ($members) {
+            if (!$anyUser) {
+                Write-Output ("{0,-20} {1,-20}" -f "USUARIO", "GRUPO")
+                Write-Output ("{0,-20} {1,-20}" -f "-------", "-----")
+                $anyUser = $true
+            }
+            foreach ($m in $members) {
+                Write-Output ("{0,-20} {1,-20}" -f $m.Name, $g)
+            }
         }
+    }
+
+    if (!$anyUser) {
+        Write-Host "[!] No hay usuarios registrados actualmente." -ForegroundColor Yellow
     }
     Write-Host "------------------------------------------"
 }
