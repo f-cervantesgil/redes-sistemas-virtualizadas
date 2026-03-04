@@ -78,36 +78,55 @@ Function Setup-FTPSite {
     $appcmd = "$env:windir\system32\inetsrv\appcmd.exe"
     & $appcmd unlock config /section:system.ftpServer/security/authentication
     & $appcmd unlock config /section:system.ftpServer/security/authorization
+    & $appcmd unlock config /section:system.ftpServer/security/ssl
+
+    Write-Host "[*] Deteniendo sitios en conflicto (puerto 21)..." -ForegroundColor Yellow
+    # Detener el Default Web Site si existe (a veces bloquea el puerto)
+    Stop-Website -Name "Default Web Site" -ErrorAction SilentlyContinue
 
     Write-Host "[*] Configurando Sitio FTP en IIS..." -ForegroundColor Cyan
     
+    # Eliminar sitio si ya existe
     if (Get-Website -Name "FTP_Practica05" -ErrorAction SilentlyContinue) {
         Remove-Website -Name "FTP_Practica05"
+        Write-Host "[!] Sitio anterior eliminado." -ForegroundColor Yellow
     }
     
+    # Crear el nuevo sitio FTP
     New-WebFtpSite -Name "FTP_Practica05" -Port 21 -PhysicalPath "C:\ftp_root" -Force
     
-    Set-ItemProperty "IIS:\Sites\FTP_Practica05" -Name ftpServer.userIsolation.mode -Value "IsolateUsers"
+    # NO usar aislamiento de usuarios por ahora (causa 530)
+    Set-ItemProperty "IIS:\Sites\FTP_Practica05" -Name ftpServer.userIsolation.mode -Value 0
     
-    # Desactivar requerimiento de SSL (Permitir texto plano)
+    # Desactivar SSL completamente (Permitir texto plano)
     Set-ItemProperty "IIS:\Sites\FTP_Practica05" -Name ftpServer.security.ssl.controlChannelPolicy -Value 0
     Set-ItemProperty "IIS:\Sites\FTP_Practica05" -Name ftpServer.security.ssl.dataChannelPolicy -Value 0
-
-    # Limpiar y establecer autenticacion
-    Set-WebConfigurationProperty -Filter "/system.ftpServer/security/authentication/basicAuthentication" -Name "enabled" -Value $true -PSPath "IIS:\Sites\FTP_Practica05" -ErrorAction SilentlyContinue
-    Set-WebConfigurationProperty -Filter "/system.ftpServer/security/authentication/anonymousAuthentication" -Name "enabled" -Value $true -PSPath "IIS:\Sites\FTP_Practica05" -ErrorAction SilentlyContinue
-
-    # Limpiar reglas de autorizacion previas para evitar error de duplicado
-    Clear-WebConfiguration -Filter "/system.ftpServer/security/authorization" -PSPath "IIS:\Sites\FTP_Practica05" -ErrorAction SilentlyContinue
-    Add-WebConfigurationProperty -Filter "/system.ftpServer/security/authorization" -Name "." -Value @{accessType="Allow"; users="*"; permissions="Read, Write"} -PSPath "IIS:\Sites\FTP_Practica05"
     
+    # Configurar Autenticacion via appcmd (mas confiable)
+    & $appcmd set config "FTP_Practica05" /section:system.ftpServer/security/authentication/basicAuthentication /enabled:true /commit:apphost
+    & $appcmd set config "FTP_Practica05" /section:system.ftpServer/security/authentication/anonymousAuthentication /enabled:true /commit:apphost
+    
+    # Limpiar y aplicar reglas de autorizacion via appcmd
+    & $appcmd set config "FTP_Practica05" /section:system.ftpServer/security/authorization /-"[users='*']" /commit:apphost 2>$null
+    & $appcmd set config "FTP_Practica05" /section:system.ftpServer/security/authorization /+"[accessType='Allow',users='*',permissions='Read,Write']" /commit:apphost
+    
+    # Abrir Firewall
     Write-Host "[*] Abriendo Firewall de Windows..." -ForegroundColor Cyan
     if (!(Get-NetFirewallRule -DisplayName "FTP Servidor" -ErrorAction SilentlyContinue)) {
         New-NetFirewallRule -DisplayName "FTP Servidor" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 21, 1024-65535
     }
 
-    Restart-WebItem "IIS:\Sites\FTP_Practica05"
+    # Reiniciar el sitio
+    Stop-Website -Name "FTP_Practica05" -ErrorAction SilentlyContinue
+    Start-Website -Name "FTP_Practica05"
+    
+    # Reiniciar servicio FTP completo
+    Restart-Service ftpsvc -ErrorAction SilentlyContinue
+    
+    Write-Host ""
     Write-Host "[+] Sitio FTP configurado exitosamente." -ForegroundColor Green
+    Write-Host "[*] Verificacion:" -ForegroundColor Cyan
+    Get-Website -Name "FTP_Practica05" | Format-Table Name, State, PhysicalPath -AutoSize
 }
 
 # 4. Gestion Masiva de Usuarios
