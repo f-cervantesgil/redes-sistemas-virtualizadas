@@ -124,7 +124,8 @@ Function Setup-FTPSite {
     New-WebFtpSite -Name "FTP_Practica05" -Port 21 -PhysicalPath "C:\ftp_root" -Force
 
     # Aislamiento de Usuarios: cada usuario entra a C:\ftp_root\LocalUser\<usuario>
-    Set-ItemProperty "IIS:\Sites\FTP_Practica05" -Name ftpServer.userIsolation.mode -Value 3
+    # Modo 2 = IsolateUsers (para usuarios locales)
+    Set-ItemProperty "IIS:\Sites\FTP_Practica05" -Name ftpServer.userIsolation.mode -Value 2
 
     # Desactivar SSL (Permitir texto plano)
     Set-ItemProperty "IIS:\Sites\FTP_Practica05" -Name ftpServer.security.ssl.controlChannelPolicy -Value 0
