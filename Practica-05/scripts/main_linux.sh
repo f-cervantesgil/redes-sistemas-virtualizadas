@@ -59,6 +59,12 @@ setup_base_env() {
     mkdir -p /srv/ftp/personal
     mkdir -p /srv/ftp/users
 
+    # Carpeta para usuario anonimo (ve todo en solo lectura)
+    mkdir -p /srv/ftp/anonymous
+    mkdir -p /srv/ftp/anonymous/publica
+    mkdir -p /srv/ftp/anonymous/reprobados
+    mkdir -p /srv/ftp/anonymous/recursadores
+
     # Permisos: publica -> todos leen y escriben
     chown root:ftp_users /srv/ftp/publica
     chmod 777 /srv/ftp/publica
@@ -70,6 +76,22 @@ setup_base_env() {
 
     chown root:recursadores /srv/ftp/grupos/recursadores
     chmod 2775 /srv/ftp/grupos/recursadores
+
+    # Bind mounts para anonimo (solo lectura)
+    if ! mountpoint -q /srv/ftp/anonymous/publica 2>/dev/null; then
+        mount --bind /srv/ftp/publica /srv/ftp/anonymous/publica
+        mount -o remount,ro,bind /srv/ftp/anonymous/publica
+    fi
+    if ! mountpoint -q /srv/ftp/anonymous/reprobados 2>/dev/null; then
+        mount --bind /srv/ftp/grupos/reprobados /srv/ftp/anonymous/reprobados
+        mount -o remount,ro,bind /srv/ftp/anonymous/reprobados
+    fi
+    if ! mountpoint -q /srv/ftp/anonymous/recursadores 2>/dev/null; then
+        mount --bind /srv/ftp/grupos/recursadores /srv/ftp/anonymous/recursadores
+        mount -o remount,ro,bind /srv/ftp/anonymous/recursadores
+    fi
+    chown root:root /srv/ftp/anonymous
+    chmod 555 /srv/ftp/anonymous
 
     # Abrir Firewall
     echo "[*] Abriendo puertos en el Firewall..."
@@ -101,7 +123,7 @@ listen_ipv6=NO
 
 # --- Acceso Anonimo (Solo Lectura) ---
 anonymous_enable=YES
-anon_root=/srv/ftp/publica
+anon_root=/srv/ftp/anonymous
 no_anon_password=YES
 anon_upload_enable=NO
 anon_mkdir_write_enable=NO

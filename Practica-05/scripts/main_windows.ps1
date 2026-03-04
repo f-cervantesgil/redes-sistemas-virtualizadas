@@ -90,11 +90,13 @@ Function Initialize-Environment {
         Set-Acl "C:\ftp_root\grupos\$g" $gAcl
     }
 
-    # Carpeta anonima: junction a publica (solo lectura)
+    # Carpeta anonima: junctions a todas las carpetas (solo lectura)
     $anonPub = "C:\ftp_root\LocalUser\Public\publica"
-    if (!(Test-Path $anonPub)) {
-        cmd /c mklink /j "$anonPub" "C:\ftp_root\publica"
-    }
+    if (!(Test-Path $anonPub)) { cmd /c mklink /j "$anonPub" "C:\ftp_root\publica" }
+    $anonRep = "C:\ftp_root\LocalUser\Public\reprobados"
+    if (!(Test-Path $anonRep)) { cmd /c mklink /j "$anonRep" "C:\ftp_root\grupos\reprobados" }
+    $anonRec = "C:\ftp_root\LocalUser\Public\recursadores"
+    if (!(Test-Path $anonRec)) { cmd /c mklink /j "$anonRec" "C:\ftp_root\grupos\recursadores" }
 
     Write-Host "[+] Entorno base configurado." -ForegroundColor Green
 }
