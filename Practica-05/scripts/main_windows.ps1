@@ -199,6 +199,12 @@ Function Add-FTPUsers {
         Add-LocalGroupMember -Group $targetGroup -Member $user -ErrorAction SilentlyContinue
         Add-LocalGroupMember -Group "Users" -Member $user -ErrorAction SilentlyContinue
 
+        # --- Ocultar usuario de la pantalla de inicio (Winlogon) ---
+        $winlogonPath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\SpecialAccounts\UserList"
+        if (!(Test-Path $winlogonPath)) { New-Item -Path $winlogonPath -Force | Out-Null }
+        New-ItemProperty -Path $winlogonPath -Name $user -PropertyType DWord -Value 0 -Force | Out-Null
+        Write-Host "[*] Usuario $user ocultado de la pantalla de inicio." -ForegroundColor Cyan
+
         # -- Estructura de Carpetas del Usuario --
         # C:\ftp_root\LocalUser\<user>\publica   -> junction a C:\ftp_root\publica
         # C:\ftp_root\LocalUser\<user>\<grupo>   -> junction a C:\ftp_root\grupos\<grupo>

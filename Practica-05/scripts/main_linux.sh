@@ -111,10 +111,13 @@ setup_base_env() {
 # 3. Configurar vsftpd.conf
 # ============================================================
 config_vsftpd() {
-    echo "[*] Configurando vsftpd.conf..."
+    # Detectar la IP de la LAN para el modo pasivo
+    LAN_IP=$(hostname -I | awk '{print $1}')
+    echo "[*] Configurando vsftpd.conf (IP PASV: $LAN_IP)..."
     mkdir -p /var/run/vsftpd/empty
 
-    CONF_CONTENT=$(cat <<'VSFTPD_EOF'
+    # Crear el contenido base
+    cat <<'VSFTPD_EOF' > /etc/vsftpd.conf
 # ================================================
 # vsftpd.conf - Practica 05
 # ================================================
@@ -160,17 +163,18 @@ connect_from_port_20=YES
 secure_chroot_dir=/var/run/vsftpd/empty
 ssl_enable=NO
 VSFTPD_EOF
-)
 
-    # Escribir en ambas rutas posibles
-    echo "$CONF_CONTENT" > /etc/vsftpd.conf
+    # Agregar la IP detectada para corregir el error de FileZilla (PASV)
+    echo "pasv_address=$LAN_IP" >> /etc/vsftpd.conf
+
+    # Copiar a la otra ruta posible si existe
     if [ -d "/etc/vsftpd" ]; then
-        echo "$CONF_CONTENT" > /etc/vsftpd/vsftpd.conf
+        cp /etc/vsftpd.conf /etc/vsftpd/vsftpd.conf
     fi
 
     systemctl restart vsftpd
     systemctl enable vsftpd
-    echo "[+] vsftpd configurado y reiniciado."
+    echo "[+] vsftpd configurado y reiniciado con pasv_address=$LAN_IP."
     echo "[*] Estado del servicio:"
     systemctl is-active vsftpd
 }
