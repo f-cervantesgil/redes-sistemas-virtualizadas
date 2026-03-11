@@ -1,4 +1,4 @@
-# Práctica 07: Sistema de Aprovisionamiento Web Automatizado (Mageia & Windows)
+# Práctica 06: Sistema de Aprovisionamiento Web Automatizado (Mageia & Windows)
 
 Esta solución integral destaca por su capacidad de desplegar servidores HTTP profesionales de forma silenciosa, gestionando dinámicamente versiones y aplicando políticas de seguridad avanzadas.
 
@@ -33,7 +33,7 @@ Practica-07/
 
 ### Windows (Server)
 1. Abra PowerShell como **Administrador**.
-2. Navegue al directorio: `cd Practica-07\scripts\windows`
+2. Navegue al directorio: `cd Practica-06\scripts\windows`
 3. Ejecute: `.\main.ps1`
    - *Asegúrese de tener Chocolatey instalado para el despliegue de Apache y Nginx.*
 
