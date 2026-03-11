@@ -21,7 +21,8 @@ function Show-Menu {
     Write-Host "1. Instalar IIS (Obligatorio)"
     Write-Host "2. Instalar Apache Win64"
     Write-Host "3. Instalar Nginx"
-    Write-Host "4. Salir"
+    Write-Host "4. Bajar un servicio"
+    Write-Host "5. Salir"
     Write-Host "==========================================" -ForegroundColor Green
     $choice = Read-Host "Seleccione una opción"
     return $choice
@@ -51,6 +52,21 @@ while ($true) {
             $version = Read-Host "Ingrese la versión exacta"
         }
         "4" {
+            Write-Host "Elija el servicio a bajar:"
+            Write-Host "1. IIS"
+            Write-Host "2. Apache"
+            Write-Host "3. Nginx"
+            $stopOpt = Read-Host "Opción"
+            switch ($stopOpt) {
+                "1" { Stop-WindowsService -ServiceName "IIS" }
+                "2" { Stop-WindowsService -ServiceName "Apache" }
+                "3" { Stop-WindowsService -ServiceName "Nginx" }
+                Default { Write-Host "Opción inválida" }
+            }
+            Read-Host "Presione Enter para continuar..."
+            continue
+        }
+        "5" {
             Write-Host "Saliendo..."
             exit
         }
@@ -72,10 +88,10 @@ while ($true) {
             
             $reason = ""
             if (Test-IsReservedPort -Port $port) {
-                $reason = "está RESERVADO (Puerto Protegido o 444)"
+                $reason = "está FUERA DE RANGO (1-65535)"
             }
             elseif (-not (Test-PortAvailability -Port $port)) {
-                $reason = "ya está siendo OCUPADO por otro servicio"
+                $reason = "ya está siendo OCUPADO"
             }
 
             if ($reason -ne "") {

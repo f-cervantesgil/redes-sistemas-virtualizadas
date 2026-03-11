@@ -30,17 +30,13 @@ check_port() {
     fi
 }
 
-# Función para validar que el puerto no sea reservado
+# Función para validar que el puerto esté en el rango válido
 is_reserved_port() {
     local port=$1
-    # Lista de puertos reservados y el 444 solicitado para la demostración
-    local reserved=(21 22 23 25 53 110 143 443 444 3306 5432)
-    for p in "${reserved[@]}"; do
-        if [ "$port" -eq "$p" ]; then
-            return 0 # Es reservado/bloqueado
-        fi
-    done
-    return 1 # No es reservado
+    if [[ "$port" -lt 1 || "$port" -gt 65535 ]]; then
+        return 0 # Fuera de rango (inválido)
+    fi
+    return 1 # En rango (válido)
 }
 
 # Listar versiones dinámicamente (Adaptado para Mageia/DNF o URPMI)
@@ -85,7 +81,7 @@ apply_security_config() {
     esac
 }
 
-# Crear página index.html personalizada
+# Crear página index.html simple
 create_custom_index() {
     local service=$1
     local version=$2
@@ -93,30 +89,11 @@ create_custom_index() {
     local path=$4
     
     cat <<EOF > "$path/index.html"
-<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <title>Servidor $service</title>
-    <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f0f2f5; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-        .card { background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); text-align: center; }
-        h1 { color: #1a73e8; }
-        .info { font-size: 1.2rem; margin: 10px 0; color: #5f6368; }
-        .badge { background: #e8f0fe; color: #1967d2; padding: 5px 12px; border-radius: 20px; font-weight: bold; }
-    </style>
-</head>
-<body>
-    <div class="card">
-        <h1>Servidor Provisionado</h1>
-        <p class="info">Servidor: <span class="badge">$service</span></p>
-        <p class="info">Versión: <span class="badge">$version</span></p>
-        <p class="info">Puerto: <span class="badge">$port</span></p>
-    </div>
-</body>
-</html>
+Servidor: $service
+Versión: $version
+Puerto: $port
 EOF
-    chown -R www-data:www-data "$path"
+    chown -R www-data:www-data "$path" 2>/dev/null
 }
 
 # Instalación de Apache (Mageia: apache)
@@ -217,4 +194,22 @@ EOF
     
     ufw allow "$port/tcp" &>/dev/null
     echo -e "${GREEN}Tomcat configurado manualmente en el puerto $port.${NC}"
+}
+
+# Función para bajar servicios
+stop_linux_service() {
+    local service=$1
+    echo -e "${BLUE}Bajando servicio $service...${NC}"
+    case $service in
+        apache2|httpd)
+            systemctl stop httpd 2>/dev/null || systemctl stop apache2 2>/dev/null
+            ;;
+        nginx)
+            systemctl stop nginx 2>/dev/null
+            ;;
+        tomcat)
+            systemctl stop tomcat 2>/dev/null
+            ;;
+    esac
+    echo -e "${GREEN}Servicio $service detenido.${NC}"
 }

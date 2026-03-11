@@ -22,15 +22,13 @@ function Test-PortAvailability {
     return $true # Libre
 }
 
-# Validar puerto reservado
+# Validar que el puerto esté en el rango válido
 function Test-IsReservedPort {
     param([int]$Port)
-    # Incluimos 444 según requerimiento de la práctica para demostración
-    $reserved = @(21, 22, 23, 25, 53, 110, 143, 443, 444, 3306, 5432)
-    if ($reserved -contains $Port) {
-        return $true
+    if ($Port -lt 1 -or $Port -gt 65535) {
+        return $true # Inválido
     }
-    return $false
+    return $false # Válido
 }
 
 # Obtener versiones dinámicamente usando Chocolatey
@@ -41,7 +39,7 @@ function Get-ServiceVersions {
     return $versions
 }
 
-# Crear página index.html personalizada
+# Crear página index.html simple
 function New-IndexPage {
     param(
         [string]$Service,
@@ -51,28 +49,9 @@ function New-IndexPage {
     )
     
     $html = @"
-<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <title>Servidor `$Service</title>
-    <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f0f2f5; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-        .card { background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); text-align: center; }
-        h1 { color: #1a73e8; }
-        .info { font-size: 1.2rem; margin: 10px 0; color: #5f6368; }
-        .badge { background: #e8f0fe; color: #1967d2; padding: 5px 12px; border-radius: 20px; font-weight: bold; }
-    </style>
-</head>
-<body>
-    <div class="card">
-        <h1>Servidor Provisionado (Windows)</h1>
-        <p class="info">Servidor: <span class="badge">`$Service</span></p>
-        <p class="info">Versión: <span class="badge">`$Version</span></p>
-        <p class="info">Puerto: <span class="badge">`$Port</span></p>
-    </div>
-</body>
-</html>
+Servidor: `$Service
+Versión: `$Version
+Puerto: `$Port
 "@
     New-Item -Path $Path -Name "index.html" -Value $html -ItemType File -Force
     # Permisos limitados (Solo lectura para el servicio)
@@ -148,4 +127,16 @@ function Install-NginxWindows {
     # Firewall
     New-NetFirewallRule -DisplayName "Nginx-Practice-$Port" -LocalPort $Port -Protocol TCP -Action Allow -Force
     # Nginx en windows se suele correr como proceso o servicio nssm
+}
+
+# Bajar servicios en Windows
+function Stop-WindowsService {
+    param([string]$ServiceName)
+    Write-Host "Bajando servicio $ServiceName..." -ForegroundColor Cyan
+    switch ($ServiceName) {
+        "IIS" { Stop-Service -Name "W3SVC" -ErrorAction SilentlyContinue }
+        "Apache" { Stop-Service -Name "Apache2.4" -ErrorAction SilentlyContinue }
+        "Nginx" { Stop-Process -Name "nginx" -ErrorAction SilentlyContinue }
+    }
+    Write-Host "Servicio $ServiceName detenido." -ForegroundColor Green
 }

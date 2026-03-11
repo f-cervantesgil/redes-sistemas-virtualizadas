@@ -22,7 +22,8 @@ show_menu() {
     echo "1. Instalar Apache2"
     echo "2. Instalar Nginx"
     echo "3. Instalar Tomcat (v9)"
-    echo "4. Salir"
+    echo "4. Bajar un servicio"
+    echo "5. Salir"
     echo -e "${GREEN}==========================================${NC}"
     read -p "Seleccione una opción: " OPTION
 }
@@ -52,6 +53,21 @@ while true; do
             VERSION="LTS (Repo)"
             ;;
         4)
+            echo "Elija el servicio a bajar:"
+            echo "1. Apache"
+            echo "2. Nginx"
+            echo "3. Tomcat"
+            read -p "Opción: " STOP_OPT
+            case $STOP_OPT in
+                1) stop_linux_service "apache2" ;;
+                2) stop_linux_service "nginx" ;;
+                3) stop_linux_service "tomcat" ;;
+                *) echo "Opción inválida" ;;
+            esac
+            read -p "Presione Enter para continuar..." dummy
+            continue
+            ;;
+        5)
             echo "Saliendo..."
             exit 0
             ;;
@@ -64,7 +80,7 @@ while true; do
 
     # Solicitar puerto con validación y opción de retorno
     while true; do
-        read -p "Ingrese el puerto de escucha (ej. 80, 8080): " PORT
+        read -p "Ingrese el puerto de escucha: " PORT
         
         # Validar si es numérico
         if [[ ! "$PORT" =~ ^[0-9]+$ ]]; then
@@ -74,12 +90,12 @@ while true; do
             continue
         fi
         
-        # Validar si es reservado o está ocupado
+        # Validar si está ocupado o rango
         REASON=""
         if is_reserved_port "$PORT"; then
-            REASON="está RESERVADO (Puerto Protegido o 444)"
+            REASON="está FUERA DE RANGO (1-65535)"
         elif ! check_port "$PORT"; then
-            REASON="ya está siendo OCUPADO por otro servicio"
+            REASON="ya está siendo OCUPADO"
         fi
 
         if [[ -n "$REASON" ]]; then
