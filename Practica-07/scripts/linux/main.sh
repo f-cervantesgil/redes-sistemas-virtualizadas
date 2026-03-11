@@ -62,25 +62,38 @@ while true; do
             ;;
     esac
 
-    # Solicitar puerto
+    # Solicitar puerto con validación y opción de retorno
     while true; do
         read -p "Ingrese el puerto de escucha (ej. 80, 8080): " PORT
+        
+        # Validar si es numérico
         if [[ ! "$PORT" =~ ^[0-9]+$ ]]; then
-            echo -e "${RED}El puerto debe ser un número.${NC}"
+            echo -e "${RED}[ERROR] El puerto debe ser un número.${NC}"
+            read -p "¿Deseas intentar con otro puerto? (s/n): " RETRY
+            if [[ "$RETRY" =~ ^[nN]$ ]]; then continue 2; fi
             continue
         fi
         
+        # Validar si es reservado o está ocupado
+        REASON=""
         if is_reserved_port "$PORT"; then
-            echo -e "${RED}[ERROR] El puerto $PORT está RESERVADO o es el puerto 444 (Bloqueado para demostración).${NC}"
-            continue
+            REASON="está RESERVADO (Puerto Protegido o 444)"
+        elif ! check_port "$PORT"; then
+            REASON="ya está siendo OCUPADO por otro servicio"
         fi
 
-        if check_port "$PORT"; then
-            break
-        else
-            echo -e "${RED}[ALERTA] El puerto $PORT ya está siendo OCUPADO por otro servicio.${NC}"
-            echo -e "${RED}Por favor, elija un puerto diferente para continuar.${NC}"
+        if [[ -n "$REASON" ]]; then
+            echo -e "${RED}[ALERTA] El puerto $PORT $REASON.${NC}"
+            read -p "¿Deseas intentar con otro puerto? (s/n): " RETRY
+            if [[ "$RETRY" =~ ^[nN]$ ]]; then 
+                continue 2 # Regresa al inicio del bucle del menú
+            else
+                continue # Vuelve a pedir el puerto
+            fi
         fi
+
+        # Si llegamos aquí, el puerto es válido
+        break
     done
 
     # Proceder con la instalación

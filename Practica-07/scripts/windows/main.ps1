@@ -29,6 +29,7 @@ function Show-Menu {
 
 while ($true) {
     $option = Show-Menu
+    $gotoMenu = $false
     
     switch ($option) {
         "1" {
@@ -60,24 +61,45 @@ while ($true) {
         }
     }
 
-    # Solicitar puerto
-    while ($true) {
+    # Solicitar puerto con validación y confirmación de salida
+    $portInputDone = $false
+    while (-not $portInputDone) {
         $portStr = Read-Host "Ingrese el puerto de escucha"
+        
+        # Validar numérico
         if ($portStr -match '^\d+$') {
             $port = [int]$portStr
+            
+            $reason = ""
             if (Test-IsReservedPort -Port $port) {
-                Write-Host "[ERROR] El puerto $port está RESERVADO o es el 444 (Bloqueado para demostración)." -ForegroundColor Red
-                continue
+                $reason = "está RESERVADO (Puerto Protegido o 444)"
             }
-            if (Test-PortAvailability -Port $port) {
-                break
-            } else {
-                Write-Host "[ALERTA] Puerto OCUPADO por otro servicio. Elija uno diferente." -ForegroundColor Red
+            elseif (-not (Test-PortAvailability -Port $port)) {
+                $reason = "ya está siendo OCUPADO por otro servicio"
             }
+
+            if ($reason -ne "") {
+                Write-Host "[ALERTA] El puerto $port $reason." -ForegroundColor Red
+                $retry = Read-Host "¿Deseas intentar con otro puerto? (s/n)"
+                if ($retry -match '^[nN]$') {
+                    $gotoMenu = $true
+                    break 
+                }
+                continue # Vuelve a pedir puerto
+            }
+
+            $portInputDone = $true
         } else {
-            Write-Host "El puerto debe ser numérico." -ForegroundColor Red
+            Write-Host "[ERROR] El puerto debe ser numérico." -ForegroundColor Red
+            $retry = Read-Host "¿Deseas intentar con otro puerto? (s/n)"
+            if ($retry -match '^[nN]$') {
+                $gotoMenu = $true
+                break 
+            }
         }
     }
+
+    if ($gotoMenu) { $gotoMenu = $false; continue }
 
     # Ejecución
     switch ($service) {

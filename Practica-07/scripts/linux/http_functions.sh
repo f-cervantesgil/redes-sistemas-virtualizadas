@@ -47,7 +47,14 @@ is_reserved_port() {
 get_versions() {
     local service=$1
     echo -e "${BLUE}Consultando versiones disponibles para $service...${NC}"
-    apt-cache madison "$service" | awk '{print $3}' | head -n 5
+    if command -v apt-cache &> /dev/null; then
+        apt-cache madison "$service" | awk '{print $3}' | head -n 5
+    elif command -v apt &> /dev/null; then
+        apt list -a "$service" 2>/dev/null | grep -v "Listing" | awk '{print $2}' | head -n 5
+    else
+        echo -e "${RED}[ERROR] No se encontró apt-cache ni apt para listar versiones.${NC}"
+        echo "Usando versión por defecto: latest"
+    fi
 }
 
 # Configuración de Seguridad General (Headers y Ocultación)
