@@ -35,48 +35,39 @@ function Modulo-SSH {
     Write-Host "============================================="
     
     Write-Host "[*] Comprobando instalacion de OpenSSH Server..."
-    try {
-        $sshFeature = Get-WindowsCapability -Online | Where-Object Name -like 'OpenSSH.Server*'
-        if ($sshFeature.State -ne 'Installed') {
-            Write-Host "[*] Instalando paquete OpenSSH Server..."
+    $sshFeature = Get-WindowsCapability -Online | Where-Object Name -like 'OpenSSH.Server*'
+    
+    if ($sshFeature.State -eq 'Installed') {
+        # Verificar si el servicio realmente existe
+        if (-not (Get-Service -Name sshd -ErrorAction SilentlyContinue)) {
+            Write-Host "[!] El paquete figura como instalado pero el servicio no existe. Intentando REPARAR..." -ForegroundColor Yellow
+            Remove-WindowsCapability -Online -Name $sshFeature.Name | Out-Null
+            Start-Sleep -Seconds 2
             Add-WindowsCapability -Online -Name $sshFeature.Name | Out-Null
         } else {
-            Write-Host "[OK] El paquete OpenSSH ya se encuentra instalado."
+            Write-Host "[OK] OpenSSH ya esta instalado y el servicio existe."
         }
-    } catch {
-        Write-Host "Error al comprobar/instalar ssh: $($_.Exception.Message)"
-        Pausa-Tecla
-        return
+    } else {
+        Write-Host "[*] Instalando paquete OpenSSH Server..."
+        Add-WindowsCapability -Online -Name $sshFeature.Name | Out-Null
     }
 
-    Write-Host "[*] Configurando el servicio para inicio automatico..."
-    Start-Sleep -Seconds 2
+    Write-Host "[*] Configurando el servicio..."
+    Start-Sleep -Seconds 3
     
+    # Intentar detectar el servicio por nombre o patron
     $sshd = Get-Service -Name sshd -ErrorAction SilentlyContinue
-    if ($sshd) {
-        Set-Service -Name sshd -StartupType Automatic
-        Start-Service sshd -ErrorAction SilentlyContinue
-    } else {
-        Write-Host "[!] El servicio 'sshd' no se encontro. Intentando instalacion profunda..." -ForegroundColor Yellow
-        # Metodo 1: DISM con nombre alternativo
-        dism /online /Enable-Feature /FeatureName:OpenSSH-Server /All /NoRestart
-        
-        Start-Sleep -Seconds 5
-        if (-not (Get-Service -Name sshd -ErrorAction SilentlyContinue)) {
-            Write-Host "[*] Intentando activar via PowerShell Capability..." -ForegroundColor Blue
-            Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
-        }
+    if (-not $sshd) { $sshd = Get-Service -DisplayName "*OpenSSH Server*" -ErrorAction SilentlyContinue }
 
-        Start-Sleep -Seconds 5
-        if (Get-Service -Name sshd -ErrorAction SilentlyContinue) {
-            Set-Service -Name sshd -StartupType Automatic
-            Start-Service sshd -ErrorAction SilentlyContinue
-        } else {
-            Write-Host "[!] Fallo critico: Windows no reconoce la caracteristica SSH." -ForegroundColor Red
-            Write-Host "[TIP] Intenta ejecutar este comando manualmente: Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0" -ForegroundColor Cyan
-            Pausa-Tecla
-            return
-        }
+    if ($sshd) {
+        Write-Host "[OK] Servicio $($sshd.Name) encontrado." -ForegroundColor Green
+        Set-Service -Name $sshd.Name -StartupType Automatic
+        Start-Service $sshd.Name -ErrorAction SilentlyContinue
+    } else {
+        Write-Host "[!] Error critico: No se pudo registrar el servicio SSH en Windows." -ForegroundColor Red
+        Write-Host "[TIP] Intenta reiniciar el servidor y ejecutar el script de nuevo." -ForegroundColor Cyan
+        Pausa-Tecla
+        return
     }
 
     Write-Host "[*] Verificando reglas del Firewall..."
