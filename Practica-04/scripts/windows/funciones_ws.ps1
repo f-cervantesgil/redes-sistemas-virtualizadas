@@ -34,38 +34,54 @@ function Modulo-SSH {
     Write-Host "      CONFIGURACION DE SERVICIO SSH          "
     Write-Host "============================================="
     
-    Write-Host "[*] Comprobando instalacion de OpenSSH Server..."
-    $sshFeature = Get-WindowsCapability -Online | Where-Object Name -like 'OpenSSH.Server*'
+    Write-Host "[*] Iniciando proceso de instalacion forzada de OpenSSH..."
     
-    if ($sshFeature.State -eq 'Installed') {
-        # Verificar si el servicio realmente existe
-        if (-not (Get-Service -Name sshd -ErrorAction SilentlyContinue)) {
-            Write-Host "[!] El paquete figura como instalado pero el servicio no existe. Intentando REPARAR..." -ForegroundColor Yellow
-            Remove-WindowsCapability -Online -Name $sshFeature.Name | Out-Null
-            Start-Sleep -Seconds 2
-            Add-WindowsCapability -Online -Name $sshFeature.Name | Out-Null
-        } else {
-            Write-Host "[OK] OpenSSH ya esta instalado y el servicio existe."
+    # Intentar instalar la capacidad nativa
+    try {
+        $ssh = Get-WindowsCapability -Online | Where-Object Name -like 'OpenSSH.Server*'
+        if ($ssh.State -ne 'Installed') {
+            Write-Host "[*] Agregando capacidad de OpenSSH Server..."
+            Add-WindowsCapability -Online -Name $ssh.Name -ErrorAction Stop | Out-Null
         }
-    } else {
-        Write-Host "[*] Instalando paquete OpenSSH Server..."
-        Add-WindowsCapability -Online -Name $sshFeature.Name | Out-Null
+    } catch {
+        Write-Host "[!] Error en Get-WindowsCapability. Intentando via DISM..." -ForegroundColor Yellow
+        dism /online /add-capability /capabilityname:OpenSSH.Server~~~~0.0.1.0 /NoRestart | Out-Null
     }
 
-    Write-Host "[*] Configurando el servicio..."
+    Write-Host "[*] Verificando existencia del servicio..."
     Start-Sleep -Seconds 3
     
-    # Intentar detectar el servicio por nombre o patron
-    $sshd = Get-Service -Name sshd -ErrorAction SilentlyContinue
-    if (-not $sshd) { $sshd = Get-Service -DisplayName "*OpenSSH Server*" -ErrorAction SilentlyContinue }
+    if (-not (Get-Service -Name sshd -ErrorAction SilentlyContinue)) {
+        Write-Host "[!] El servicio no aparece. Buscando archivos en el sistema..." -ForegroundColor Yellow
+        $sshdExe = "C:\Windows\System32\OpenSSH\sshd.exe"
+        if (Test-Path $sshdExe) {
+            Write-Host "[*] Archivo detectado en System32. Registrando servicio manualmente..." -ForegroundColor Cyan
+            # Intentar usar el script de instalacion oficial de Windows si existe
+            if (Test-Path "C:\Windows\System32\OpenSSH\install-sshd.ps1") {
+                Set-Location "C:\Windows\System32\OpenSSH"
+                ./install-sshd.ps1 | Out-Null
+                Set-Location $PSScriptRoot
+            } else {
+                # Registro manual puro vía SC
+                sc.exe create sshd binPath= $sshdExe start= auto displayname= "OpenSSH SSH Server" | Out-Null
+            }
+        } else {
+            Write-Host "[CRITICO] No se encontraron los archivos de OpenSSH en C:\Windows\System32\OpenSSH." -ForegroundColor Red
+            Write-Host "[TIP] Revisa si tienes conexion a internet, ya que Windows necesita descargar los archivos." -ForegroundColor Yellow
+            Pausa-Tecla
+            return
+        }
+    }
 
-    if ($sshd) {
-        Write-Host "[OK] Servicio $($sshd.Name) encontrado." -ForegroundColor Green
-        Set-Service -Name $sshd.Name -StartupType Automatic
-        Start-Service $sshd.Name -ErrorAction SilentlyContinue
+    # Configurar y arrancar
+    if (Get-Service -Name sshd -ErrorAction SilentlyContinue) {
+        Write-Host "[OK] Servicio sshd registrado. Iniciando..." -ForegroundColor Green
+        Set-Service -Name sshd -StartupType Automatic
+        Set-Service -Name ssh-agent -StartupType Automatic -ErrorAction SilentlyContinue
+        Start-Service sshd -ErrorAction SilentlyContinue
+        Start-Service ssh-agent -ErrorAction SilentlyContinue
     } else {
-        Write-Host "[!] Error critico: No se pudo registrar el servicio SSH en Windows." -ForegroundColor Red
-        Write-Host "[TIP] Intenta reiniciar el servidor y ejecutar el script de nuevo." -ForegroundColor Cyan
+        Write-Host "[!] No se pudo activar el servicio despues de todos los intentos." -ForegroundColor Red
         Pausa-Tecla
         return
     }
