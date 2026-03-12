@@ -50,7 +50,6 @@ function Modulo-SSH {
     }
 
     Write-Host "[*] Configurando el servicio para inicio automatico..."
-    # Esperar un momento a que el servicio se registre si se acaba de instalar
     Start-Sleep -Seconds 2
     
     $sshd = Get-Service -Name sshd -ErrorAction SilentlyContinue
@@ -58,14 +57,23 @@ function Modulo-SSH {
         Set-Service -Name sshd -StartupType Automatic
         Start-Service sshd -ErrorAction SilentlyContinue
     } else {
-        Write-Host "[!] El servicio 'sshd' no se encontro. Intentando instalar via DISM..." -ForegroundColor Yellow
-        dism /online /Enable-Feature /FeatureName:OpenSSH-Server-OC /All /NoRestart
+        Write-Host "[!] El servicio 'sshd' no se encontro. Intentando instalacion profunda..." -ForegroundColor Yellow
+        # Metodo 1: DISM con nombre alternativo
+        dism /online /Enable-Feature /FeatureName:OpenSSH-Server /All /NoRestart
+        
+        Start-Sleep -Seconds 5
+        if (-not (Get-Service -Name sshd -ErrorAction SilentlyContinue)) {
+            Write-Host "[*] Intentando activar via PowerShell Capability..." -ForegroundColor Blue
+            Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+        }
+
         Start-Sleep -Seconds 5
         if (Get-Service -Name sshd -ErrorAction SilentlyContinue) {
             Set-Service -Name sshd -StartupType Automatic
             Start-Service sshd -ErrorAction SilentlyContinue
         } else {
-            Write-Host "[!] Fallo critico: No se pudo instalar o encontrar el servicio SSH." -ForegroundColor Red
+            Write-Host "[!] Fallo critico: Windows no reconoce la caracteristica SSH." -ForegroundColor Red
+            Write-Host "[TIP] Intenta ejecutar este comando manualmente: Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0" -ForegroundColor Cyan
             Pausa-Tecla
             return
         }
