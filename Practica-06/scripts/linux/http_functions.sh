@@ -279,15 +279,25 @@ check_services_status() {
         # Verificar estado
         local status=$(systemctl is-active "$srv" 2>/dev/null)
         if [[ "$status" == "active" ]]; then
-            status_text="${GREEN}Corriendo${NC}"
-            # Obtener puerto usando ss
-            local ports=$(ss -tulpn 2>/dev/null | grep "$srv" | awk '{print $5}' | cut -d':' -f2 | sort -u | tr '\n' ',' | sed 's/,$//')
-            [[ -z "$ports" ]] && ports="Desconocido"
+            status_text="Corriendo"
+            color=$GREEN
+            
+            # Buscar puerto: si es tomcat, buscar el proceso 'java'
+            local search_pattern="$srv"
+            [[ "$srv" == "tomcat" ]] && search_pattern="java"
+            
+            local ports=$(ss -tulpn 2>/dev/null | grep -i "$search_pattern" | awk '{print $5}' | cut -d':' -f2 | sort -u | tr '\n' ',' | sed 's/,$//')
+            [[ -z "$ports" ]] && ports="Iniciando..."
         else
-            status_text="${RED}Detenido${NC}"
+            status_text="Detenido"
+            color=$RED
             ports="-"
         fi
-        printf "%-15s | %-21s | %-10s\n" "$srv" "$status_text" "$ports"
+        
+        # Imprimir fila con formato limpio
+        printf "%-15s | " "$srv"
+        echo -ne "${color}%-12s${NC}" "$status_text"
+        printf " | %-10s\n" "$ports"
     done
     echo -e "${BLUE}==========================================${NC}"
 }
