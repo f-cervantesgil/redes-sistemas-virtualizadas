@@ -133,6 +133,9 @@ install_apache() {
     # Fallback para rutas alternativas
     find /etc/apache2 -name "*.conf" -exec sed -i "s/^Listen\s\+[0-9]\+/Listen $port/g" {} + 2>/dev/null
     
+    # Asegurar directorio raíz antes de validar
+    mkdir -p /var/www/html
+    
     apply_security_config "httpd" "/var/www/html"
     create_custom_index "Apache/Mageia" "Latest" "$port" "/var/www/html"
     
@@ -157,6 +160,9 @@ install_nginx() {
     echo -e "${BLUE}Forzando cambio de puerto en todos los archivos de Nginx...${NC}"
     find /etc/nginx -name "*.conf" -exec sed -i "s/listen\s\+[0-9]\+/listen $port/g" {} +
     find /etc/nginx -name "*.conf" -exec sed -i "s/listen\s\+\[::\]:[0-9]\+;/listen [::]:$port;/g" {} +
+    
+    # Asegurar directorio raíz antes de validar
+    mkdir -p /var/www/html
     
     apply_security_config "nginx" "/var/www/html"
     create_custom_index "Nginx/Mageia" "Latest" "$port" "/var/www/html"
