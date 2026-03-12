@@ -41,25 +41,32 @@ function Install-IIS {
     try {
         Enable-WindowsOptionalFeature -Online -FeatureName "IIS-WebServerRole", "IIS-WebServer", "IIS-CommonHttpFeatures" -NoRestart -ErrorAction SilentlyContinue | Out-Null
         Import-Module WebAdministration
-        Start-Sleep -Seconds 3 # Tiempo vital para que el proveedor IIS: se cargue
+        Start-Sleep -Seconds 2
         
-        # Detectar cualquier sitio que exista
+        # Detectar sitio
         $site = Get-Website | Select-Object -First 1
-        
         if ($site) {
-            Write-Host "[*] Configurando puerto en sitio detectado: $($site.Name)" -ForegroundColor Cyan
+            Write-Host "[*] Aplicando puerto $Port a $($site.Name)..." -ForegroundColor Cyan
+            # Forzar binding completo: protocolo:ip:puerto:nombre_host
             Set-ItemProperty "IIS:\Sites\$($site.Name)" -Name bindings -Value @{protocol="http";bindingInformation="*:${Port}:"}
+            Set-ItemProperty "IIS:\Sites\$($site.Name)" -Name serverAutoStart -Value $true
         } else {
-            Write-Host "[*] No hay sitios. Creando Default Web Site en puerto $Port..." -ForegroundColor Cyan
             New-Website -Name "Default Web Site" -Port $Port -PhysicalPath "C:\inetpub\wwwroot" -Force | Out-Null
         }
         
-        New-IndexPage -Service "IIS" -Version "LTS" -Port $Port -Path "C:\inetpub\wwwroot"
-        # Firewall sin errores
-        Remove-NetFirewallRule -DisplayName "HTTP-Practice-*" -ErrorAction SilentlyContinue | Out-Null
-        New-NetFirewallRule -DisplayName "HTTP-Practice-${Port}" -LocalPort $Port -Protocol TCP -Action Allow | Out-Null
+        # Reiniciar IIS para aplicar cambios
+        Write-Host "[*] Reiniciando servicios de IIS..." -ForegroundColor Yellow
+        iisreset /restart | Out-Null
         
-        Write-Host "[OK] IIS configurado en el puerto $Port" -ForegroundColor Green
+        New-IndexPage -Service "IIS" -Version "LTS" -Port $Port -Path "C:\inetpub\wwwroot"
+        
+        # Abrir Firewall (Limpieza agresiva por puerto)
+        $ruleName = "HTTP-Practice-${Port}"
+        Get-NetFirewallRule -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like "HTTP-Practice-*" -or $_.DisplayName -eq $ruleName } | Remove-NetFirewallRule -ErrorAction SilentlyContinue
+        
+        New-NetFirewallRule -DisplayName $ruleName -LocalPort $Port -Protocol TCP -Action Allow -Direction Inbound -Description "Acceso forzado para Practica 06" | Out-Null
+        
+        Write-Host "[OK] IIS configurado y puerto $Port abierto en Firewall." -ForegroundColor Green
     } catch {
         Write-Host "[!] Error al configurar IIS: $_" -ForegroundColor Red
     }
