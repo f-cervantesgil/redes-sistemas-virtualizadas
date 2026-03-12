@@ -28,74 +28,66 @@ function Ingresar-IP {
 function Modulo-SSH {
     Clear-Host
     Write-Host "============================================="
-    Write-Host "      CONFIGURACION DE SERVICIO SSH          "
+    Write-Host "      CONFIGURACION DE SERVICIO SSH (V4)     "
     Write-Host "============================================="
     
-    Write-Host "[*] Iniciando proceso de instalacion de OpenSSH..."
-    
-    # Paso 1: Asegurar que Windows Update este encendido (necesario para instalar componentes)
-    Write-Host "[*] Asegurando servicio de Windows Update (wuauserv)..."
-    Set-Service -Name wuauserv -StartupType Manual -ErrorAction SilentlyContinue
-    Start-Service -Name wuauserv -ErrorAction SilentlyContinue
-
-    # Paso 2: Intentar instalar via capacidad nativa
+    Write-Host "[*] Detectando estado real de OpenSSH..."
     $sshCap = Get-WindowsCapability -Online | Where-Object Name -like "OpenSSH.Server*"
-    if ($null -ne $sshCap) {
-        if ($sshCap.State -ne "Installed") {
-            Write-Host "[*] Instalando $($sshCap.Name) desde servidores de Microsoft..."
-            try {
-                Add-WindowsCapability -Online -Name $sshCap.Name -ErrorAction Stop | Out-Null
-                Write-Host "[OK] Instalacion por capacidad completada." -ForegroundColor Green
-            } catch {
-                Write-Host "[!] Fallo la capacidad nativa. Intentando metodos alternativos..." -ForegroundColor Yellow
-            }
-        } else {
-            Write-Host "[OK] El paquete ya figura como instalado."
+    
+    # Reparacion de registro (Si dice instalado pero no hay servicio)
+    if ($sshCap.State -eq "Installed" -and -not (Get-Service -Name sshd -ErrorAction SilentlyContinue)) {
+        Write-Host "[!] Instalacion corrupta detectada. Limpiando registros..." -ForegroundColor Yellow
+        Remove-WindowsCapability -Online -Name $sshCap.Name | Out-Null
+        Start-Sleep -Seconds 2
+    }
+
+    # Fuerza de descarga: Saltarse WSUS si existe (Error 0x800f0954)
+    Write-Host "[*] Forzando descarga desde Microsoft Update..."
+    $regPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU"
+    $regValue = "UseWUServer"
+    $originalValue = $null
+    if (Test-Path $regPath) {
+        $originalValue = Get-ItemProperty -Path $regPath -Name $regValue -ErrorAction SilentlyContinue
+        Set-ItemProperty -Path $regPath -Name $regValue -Value 0 -ErrorAction SilentlyContinue
+    }
+
+    try {
+        Write-Host "[*] Intentando instalacion limpia..."
+        Add-WindowsCapability -Online -Name $sshCap.Name -ErrorAction Stop | Out-Null
+        Write-Host "[OK] Instalacion completada." -ForegroundColor Green
+    } catch {
+        Write-Host "[!] Fallo Add-WindowsCapability. Intentando via DISM Forzado..." -ForegroundColor Yellow
+        dism /online /add-capability /capabilityname:$($sshCap.Name) /NoRestart /LimitAccess:$false | Out-Null
+    } finally {
+        # Restaurar valor original de WSUS
+        if ($null -ne $originalValue) {
+            Set-ItemProperty -Path $regPath -Name $regValue -Value $originalValue.$regValue -ErrorAction SilentlyContinue
         }
     }
 
-    # Paso 3: Fallback con Chocolatey (Si lo nativo no genero el servicio)
-    if (-not (Get-Service -Name sshd -ErrorAction SilentlyContinue)) {
-        Write-Host "[*] El servicio sshd no aparece. Intentando via Chocolatey..." -ForegroundColor Cyan
-        if (Get-Command choco -ErrorAction SilentlyContinue) {
-            choco install openssh -y -params '"/SSHServerFeature"' | Out-Null
-        } else {
-            Write-Host "[!] Chocolatey no detectado. Intentando DISM directo..." -ForegroundColor Yellow
-            dism /online /add-capability /capabilityname:OpenSSH.Server~~~~0.0.1.0 /NoRestart | Out-Null
-        }
-    }
-
-    Write-Host "[*] Verificando registro del servicio..."
+    Write-Host "[*] Verificando servicio..."
     Start-Sleep -Seconds 3
     
     $sshd = Get-Service -Name sshd -ErrorAction SilentlyContinue
     if ($sshd) {
-        Write-Host "[OK] Servicio encontrado. Configurando arranque..." -ForegroundColor Green
+        Write-Host "[OK] Servicio SSH encontrado y listo." -ForegroundColor Green
         Set-Service -Name sshd -StartupType Automatic
         Start-Service sshd -ErrorAction SilentlyContinue
     } else {
-        # Paso 4: Registro manual si los archivos existen en el disco
-        $exe = "$env:SystemRoot\System32\OpenSSH\sshd.exe"
-        if (Test-Path $exe) {
-            Write-Host "[*] Archivos detectados pero servicio no registrado. Registrando manualmente..." -ForegroundColor Yellow
-            sc.exe create sshd binPath= $exe start= auto displayname= "OpenSSH SSH Server" | Out-Null
-            Start-Service sshd -ErrorAction SilentlyContinue
-        } else {
-            Write-Host "[ERROR] El sistema no pudo descargar/instalar los archivos de OpenSSH." -ForegroundColor Red
-            Write-Host "[TIP] Intenta correr este comando manualmente: Add-WindowsCapability -Online -Name $($sshCap.Name)" -ForegroundColor Cyan
-            Pausa-Tecla
-            return
-        }
+        Write-Host "[ERROR] El servicio sigue sin aparecer." -ForegroundColor Red
+        Write-Host "[CONSEJO] Intenta instalar Chocolatey (si no lo tienes) corriendo:" -ForegroundColor Cyan
+        Write-Host "Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))"
+        Pausa-Tecla
+        return
     }
 
-    # Paso 5: Firewall
-    Write-Host "[*] Configurando Firewall..."
+    # Firewall
+    Write-Host "[*] Asegurando Firewall (Puerto 22)..."
     if (-not (Get-NetFirewallRule -Name "OpenSSH-Server-In-TCP" -ErrorAction SilentlyContinue)) {
         New-NetFirewallRule -Name "OpenSSH-Server-In-TCP" -DisplayName "OpenSSH Server (sshd)" -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 | Out-Null
-        Write-Host "[OK] Regla de Firewall creada."
     }
-
-    Write-Host "`n[FIN] Proceso de SSH terminado."
+    
+    Write-Host "`n[FIN] SSH Activado."
     Pausa-Tecla
 }
 
