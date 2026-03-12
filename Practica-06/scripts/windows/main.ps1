@@ -37,27 +37,32 @@ function New-IndexPage {
 
 function Install-IIS {
     param([int]$Port)
-    Write-Host "Habilitando IIS (Internet Information Services)..." -ForegroundColor Blue
-    Enable-WindowsOptionalFeature -Online -FeatureName "IIS-WebServerRole", "IIS-WebServer", "IIS-CommonHttpFeatures" -NoRestart | Out-Null
-    
-    Import-Module WebAdministration
-    Start-Sleep -Seconds 2 # Dar tiempo al proveedor IIS: para inicializar
-    
-    # Intentar obtener el sitio por defecto (ID 1) o el primero que exista
-    $site = Get-Website | Where-Object { $_.id -eq 1 }
-    if (-not $site) { $site = Get-Website | Select-Object -First 1 }
-
-    if ($site) {
-        Write-Host "[*] Configurando puerto en el sitio: $($site.Name)" -ForegroundColor Cyan
-        Set-ItemProperty "IIS:\Sites\$($site.Name)" -Name bindings -Value @{protocol="http";bindingInformation="*:${Port}:"}
-    } else {
-        Write-Host "[*] No se encontro sitio por defecto. Creando uno nuevo..." -ForegroundColor Cyan
-        New-Website -Name "Default Web Site" -Port $Port -PhysicalPath "C:\inetpub\wwwroot" -Force | Out-Null
+    Write-Host "`n[*] Habilitando IIS (Internet Information Services)..." -ForegroundColor Blue
+    try {
+        Enable-WindowsOptionalFeature -Online -FeatureName "IIS-WebServerRole", "IIS-WebServer", "IIS-CommonHttpFeatures" -NoRestart -ErrorAction SilentlyContinue | Out-Null
+        Import-Module WebAdministration
+        Start-Sleep -Seconds 3 # Tiempo vital para que el proveedor IIS: se cargue
+        
+        # Detectar cualquier sitio que exista
+        $site = Get-Website | Select-Object -First 1
+        
+        if ($site) {
+            Write-Host "[*] Configurando puerto en sitio detectado: $($site.Name)" -ForegroundColor Cyan
+            Set-ItemProperty "IIS:\Sites\$($site.Name)" -Name bindings -Value @{protocol="http";bindingInformation="*:${Port}:"}
+        } else {
+            Write-Host "[*] No hay sitios. Creando Default Web Site en puerto $Port..." -ForegroundColor Cyan
+            New-Website -Name "Default Web Site" -Port $Port -PhysicalPath "C:\inetpub\wwwroot" -Force | Out-Null
+        }
+        
+        New-IndexPage -Service "IIS" -Version "LTS" -Port $Port -Path "C:\inetpub\wwwroot"
+        # Firewall sin errores
+        Remove-NetFirewallRule -DisplayName "HTTP-Practice-*" -ErrorAction SilentlyContinue | Out-Null
+        New-NetFirewallRule -DisplayName "HTTP-Practice-${Port}" -LocalPort $Port -Protocol TCP -Action Allow | Out-Null
+        
+        Write-Host "[OK] IIS configurado en el puerto $Port" -ForegroundColor Green
+    } catch {
+        Write-Host "[!] Error al configurar IIS: $_" -ForegroundColor Red
     }
-    
-    New-IndexPage -Service "IIS" -Version "LTS" -Port $Port -Path "C:\inetpub\wwwroot"
-    New-NetFirewallRule -DisplayName "HTTP-Practice-${Port}" -LocalPort $Port -Protocol TCP -Action Allow -Force | Out-Null
-    Write-Host "IIS configurado correctamente en el puerto $Port" -ForegroundColor Green
 }
 
 function Install-ApacheWindows {
