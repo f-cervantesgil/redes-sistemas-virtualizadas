@@ -104,8 +104,8 @@ install_apache() {
     echo -e "${BLUE}Instalando Apache en Mageia...${NC}"
     dnf install -y apache 2>/dev/null || urpmi --auto apache
     
-    # Cambiar puerto
-    sed -i "s/Listen 80/Listen $port/" /etc/httpd/conf/httpd.conf
+    # Cambiar puerto de forma robusta (maneja cualquier cantidad de espacios)
+    sed -i "s/^Listen\s\+[0-9]\+/Listen $port/" /etc/httpd/conf/httpd.conf
     
     apply_security_config "httpd" "/var/www/html"
     create_custom_index "Apache/Mageia" "Latest" "$port" "/var/www/html"
@@ -127,7 +127,9 @@ install_nginx() {
     echo -e "${BLUE}Instalando Nginx en Mageia...${NC}"
     dnf install -y nginx 2>/dev/null || urpmi --auto nginx
     
-    sed -i "s/listen 80;/listen $port;/" /etc/nginx/nginx.conf
+    # Cambiar puerto de forma robusta (IPv4 e IPv6, maneja cualquier número de puerto previo)
+    sed -i "s/listen\s\+[0-9]\+;/listen $port;/" /etc/nginx/nginx.conf
+    sed -i "s/listen\s\+\[::\]:[0-9]\+;/listen [::]:$port;/" /etc/nginx/nginx.conf
     
     apply_security_config "nginx" "/var/www/html"
     create_custom_index "Nginx/Mageia" "Latest" "$port" "/var/www/html"

@@ -100,7 +100,7 @@ function Install-ApacheWindows {
     
     $confPath = "C:\tools\apache24\conf\httpd.conf"
     if (Test-Path $confPath) {
-        (Get-Content $confPath) -replace "Listen 80", "Listen $Port" | Set-Content $confPath
+        (Get-Content $confPath) -replace "^Listen\s+\d+", "Listen $Port" | Set-Content $confPath
         
         # Ocultar tokens
         Add-Content $confPath "`nServerTokens Prod`nServerSignature Off"
@@ -119,7 +119,8 @@ function Install-NginxWindows {
     
     $confPath = "C:\tools\nginx\conf\nginx.conf"
     if (Test-Path $confPath) {
-        (Get-Content $confPath) -replace "listen\s+80;", "listen $Port;" | Set-Content $confPath
+        (Get-Content $confPath) -replace "listen\s+\d+;", "listen $Port;" | Set-Content $confPath
+        (Get-Content $confPath) -replace "listen\s+\[::\]:\d+;", "listen [::]:$Port;" | Set-Content $confPath
         # Ocultar versión
         (Get-Content $confPath) -replace "#server_tokens off;", "server_tokens off;" | Set-Content $confPath
     }
