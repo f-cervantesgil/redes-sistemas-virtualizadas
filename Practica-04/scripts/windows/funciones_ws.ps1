@@ -28,66 +28,73 @@ function Ingresar-IP {
 function Modulo-SSH {
     Clear-Host
     Write-Host "============================================="
-    Write-Host "      CONFIGURACION DE SERVICIO SSH (V4)     "
+    Write-Host "      CONFIGURACION DE SERVICIO SSH (V5)     "
     Write-Host "============================================="
     
-    Write-Host "[*] Detectando estado real de OpenSSH..."
+    Write-Host "[*] Verificando instalacion..."
     $sshCap = Get-WindowsCapability -Online | Where-Object Name -like "OpenSSH.Server*"
     
-    # Reparacion de registro (Si dice instalado pero no hay servicio)
-    if ($sshCap.State -eq "Installed" -and -not (Get-Service -Name sshd -ErrorAction SilentlyContinue)) {
-        Write-Host "[!] Instalacion corrupta detectada. Limpiando registros..." -ForegroundColor Yellow
-        Remove-WindowsCapability -Online -Name $sshCap.Name | Out-Null
-        Start-Sleep -Seconds 2
-    }
+    if ($sshCap.State -ne "Installed") {
+        # Fuerza de descarga: Saltarse WSUS para descargar de Microsoft
+        $regPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU"
+        $originalValue = $null
+        if (Test-Path $regPath) {
+            $originalValue = Get-ItemProperty -Path $regPath -Name "UseWUServer" -ErrorAction SilentlyContinue
+            Set-ItemProperty -Path $regPath -Name "UseWUServer" -Value 0 -ErrorAction SilentlyContinue
+        }
 
-    # Fuerza de descarga: Saltarse WSUS si existe (Error 0x800f0954)
-    Write-Host "[*] Forzando descarga desde Microsoft Update..."
-    $regPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU"
-    $regValue = "UseWUServer"
-    $originalValue = $null
-    if (Test-Path $regPath) {
-        $originalValue = Get-ItemProperty -Path $regPath -Name $regValue -ErrorAction SilentlyContinue
-        Set-ItemProperty -Path $regPath -Name $regValue -Value 0 -ErrorAction SilentlyContinue
-    }
-
-    try {
-        Write-Host "[*] Intentando instalacion limpia..."
-        Add-WindowsCapability -Online -Name $sshCap.Name -ErrorAction Stop | Out-Null
-        Write-Host "[OK] Instalacion completada." -ForegroundColor Green
-    } catch {
-        Write-Host "[!] Fallo Add-WindowsCapability. Intentando via DISM Forzado..." -ForegroundColor Yellow
-        dism /online /add-capability /capabilityname:$($sshCap.Name) /NoRestart /LimitAccess:$false | Out-Null
-    } finally {
-        # Restaurar valor original de WSUS
-        if ($null -ne $originalValue) {
-            Set-ItemProperty -Path $regPath -Name $regValue -Value $originalValue.$regValue -ErrorAction SilentlyContinue
+        try {
+            Write-Host "[*] Instalando componentes desde Microsoft Update..."
+            Add-WindowsCapability -Online -Name $sshCap.Name -ErrorAction Stop | Out-Null
+            Write-Host "[OK] Archivos de instalacion descargados." -ForegroundColor Green
+        } catch {
+            Write-Host "[!] Error en descarga nativa. Intentando DISM..." -ForegroundColor Yellow
+            dism /online /add-capability /capabilityname:$($sshCap.Name) /NoRestart /LimitAccess:$false | Out-Null
+        } finally {
+            if ($null -ne $originalValue) {
+                Set-ItemProperty -Path $regPath -Name "UseWUServer" -Value $originalValue.UseWUServer -ErrorAction SilentlyContinue
+            }
         }
     }
 
-    Write-Host "[*] Verificando servicio..."
+    Write-Host "[*] Verificando registro del servicio..."
     Start-Sleep -Seconds 3
     
+    if (-not (Get-Service -Name sshd -ErrorAction SilentlyContinue)) {
+        Write-Host "[!] El servicio no esta registrado. Buscando ejecutables..." -ForegroundColor Yellow
+        $exePath = "$env:SystemRoot\System32\OpenSSH\sshd.exe"
+        if (Test-Path $exePath) {
+            Write-Host "[*] Ejecutable encontrado. Forzando registro manual..." -ForegroundColor Cyan
+            sc.exe create sshd binPath= $exePath start= auto displayname= "OpenSSH SSH Server" | Out-Null
+            sc.exe description sshd "OpenSSH-based secure shell server" | Out-Null
+        } else {
+            Write-Host "[*] Intentando via Chocolatey como ultimo recurso..." -ForegroundColor Blue
+            if (Get-Command choco -ErrorAction SilentlyContinue) {
+                choco install openssh -y -params '"/SSHServerFeature"' | Out-Null
+            }
+        }
+    }
+
+    # Intento final de encendido
     $sshd = Get-Service -Name sshd -ErrorAction SilentlyContinue
     if ($sshd) {
-        Write-Host "[OK] Servicio SSH encontrado y listo." -ForegroundColor Green
+        Write-Host "[OK] Servicio SSH activado correctamente." -ForegroundColor Green
         Set-Service -Name sshd -StartupType Automatic
         Start-Service sshd -ErrorAction SilentlyContinue
     } else {
-        Write-Host "[ERROR] El servicio sigue sin aparecer." -ForegroundColor Red
-        Write-Host "[CONSEJO] Intenta instalar Chocolatey (si no lo tienes) corriendo:" -ForegroundColor Cyan
-        Write-Host "Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))"
+        Write-Host "[ERROR] No se pudo crear el servicio. Posiblemente requiera reinicio." -ForegroundColor Red
+        Write-Host "[TIP] Reinicia la VM y vuelve a correr el script." -ForegroundColor Yellow
         Pausa-Tecla
         return
     }
 
     # Firewall
-    Write-Host "[*] Asegurando Firewall (Puerto 22)..."
+    Write-Host "[*] Configurando Firewall..."
     if (-not (Get-NetFirewallRule -Name "OpenSSH-Server-In-TCP" -ErrorAction SilentlyContinue)) {
         New-NetFirewallRule -Name "OpenSSH-Server-In-TCP" -DisplayName "OpenSSH Server (sshd)" -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 | Out-Null
     }
     
-    Write-Host "`n[FIN] SSH Activado."
+    Write-Host "`n[FIN] SSH listo. Ya puedes conectar al puerto 22."
     Pausa-Tecla
 }
 
