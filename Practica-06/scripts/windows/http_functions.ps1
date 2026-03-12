@@ -177,14 +177,23 @@ function Get-ServicesStatus {
             $statusColor = "Green"
             
             # Intentar obtener puertos
-            $connections = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object {
-                $proc = Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue
-                $proc -and ($proc.Name -like "*$($srv.Binary)*")
-            }
-            if ($connections) {
-                $ports = ($connections.LocalPort | Select-Object -Unique) -join ","
+            if ($srv.Name -eq "IIS") {
+                # Para IIS usamos el módulo de WebAdministration que es más fiable
+                try {
+                    Import-Module WebAdministration -ErrorAction SilentlyContinue
+                    $bindings = Get-WebBinding -Protocol "http"
+                    $ports = ($bindings.bindingInformation | ForEach-Object { $_.Split(":")[1] } | Select-Object -Unique) -join ","
+                } catch { $ports = "Error detectando" }
             } else {
-                $ports = "Desconocido"
+                $connections = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object {
+                    $proc = Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue
+                    $proc -and ($proc.Name -like "*$($srv.Binary)*")
+                }
+                if ($connections) {
+                    $ports = ($connections.LocalPort | Select-Object -Unique) -join ","
+                } else {
+                    $ports = "Iniciando..."
+                }
             }
         }
 
