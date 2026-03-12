@@ -40,7 +40,9 @@ function Install-IIS {
     Write-Host "Habilitando IIS (Internet Information Services)..." -ForegroundColor Blue
     Enable-WindowsOptionalFeature -Online -FeatureName "IIS-WebServerRole", "IIS-WebServer", "IIS-CommonHttpFeatures" -NoRestart
     Import-Module WebAdministration
-    Set-WebBinding -Name "Default Web Site" -BindingInformation "*:${Port}:"
+    # Cambiar el puerto del sitio por defecto de forma directa
+    Set-ItemProperty "IIS:\Sites\Default Web Site" -Name bindings -Value @{protocol="http";bindingInformation="*:${Port}:"}
+    
     New-IndexPage -Service "IIS" -Version "LTS" -Port $Port -Path "C:\inetpub\wwwroot"
     New-NetFirewallRule -DisplayName "HTTP-Practice-$Port" -LocalPort $Port -Protocol TCP -Action Allow -Force
     Write-Host "IIS configurado correctamente en el puerto $Port" -ForegroundColor Green
