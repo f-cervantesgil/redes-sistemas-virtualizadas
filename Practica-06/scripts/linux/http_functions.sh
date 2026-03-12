@@ -127,8 +127,11 @@ install_apache() {
     echo -e "${BLUE}Instalando Apache en Mageia...${NC}"
     dnf install -y apache 2>/dev/null || urpmi --auto apache
     
-    # Cambiar puerto de forma infalible (maneja default_server y cualquier puerto previo)
-    sed -i "s/Listen\s\+[0-9]\+/Listen $port/g" /etc/httpd/conf/httpd.conf
+    # [FUERZA BRUTA] Cambiar Listen en TODOS los archivos de configuración
+    echo -e "${BLUE}Forzando cambio de puerto en todos los archivos de Apache...${NC}"
+    find /etc/httpd -name "*.conf" -exec sed -i "s/^Listen\s\+[0-9]\+/Listen $port/g" {} +
+    # Fallback para rutas alternativas
+    find /etc/apache2 -name "*.conf" -exec sed -i "s/^Listen\s\+[0-9]\+/Listen $port/g" {} + 2>/dev/null
     
     apply_security_config "httpd" "/var/www/html"
     create_custom_index "Apache/Mageia" "Latest" "$port" "/var/www/html"
@@ -150,9 +153,10 @@ install_nginx() {
     echo -e "${BLUE}Instalando Nginx en Mageia...${NC}"
     dnf install -y nginx 2>/dev/null || urpmi --auto nginx
     
-    # Cambiar puerto de forma infalible (maneja default_server, IPv6 y cualquier puerto previo)
-    sed -i "s/listen\s\+[0-9]\+/listen $port/g" /etc/nginx/nginx.conf
-    sed -i "s/listen\s\+\[::\]:[0-9]\+/listen [::]:$port/g" /etc/nginx/nginx.conf
+    # [FUERZA BRUTA] Cambiar listen en TODOS los archivos de configuración (v4 y v6)
+    echo -e "${BLUE}Forzando cambio de puerto en todos los archivos de Nginx...${NC}"
+    find /etc/nginx -name "*.conf" -exec sed -i "s/listen\s\+[0-9]\+/listen $port/g" {} +
+    find /etc/nginx -name "*.conf" -exec sed -i "s/listen\s\+\[::\]:[0-9]\+;/listen [::]:$port;/g" {} +
     
     apply_security_config "nginx" "/var/www/html"
     create_custom_index "Nginx/Mageia" "Latest" "$port" "/var/www/html"
