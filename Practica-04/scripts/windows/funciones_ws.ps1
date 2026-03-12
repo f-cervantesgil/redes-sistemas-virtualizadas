@@ -36,50 +36,52 @@ function Modulo-SSH {
     
     Write-Host "[*] Iniciando proceso de instalacion forzada de OpenSSH..."
     
-    # Intentar instalar la capacidad nativa
+    # 1. Intentar instalar la capacidad nativa (Requiere Internet/Windows Update)
     try {
         $ssh = Get-WindowsCapability -Online | Where-Object Name -like 'OpenSSH.Server*'
         if ($ssh.State -ne 'Installed') {
-            Write-Host "[*] Agregando capacidad de OpenSSH Server..."
+            Write-Host "[*] Agregando capacidad de OpenSSH Server via Windows Update..."
             Add-WindowsCapability -Online -Name $ssh.Name -ErrorAction Stop | Out-Null
         }
     } catch {
-        Write-Host "[!] Error en Get-WindowsCapability. Intentando via DISM..." -ForegroundColor Yellow
-        dism /online /add-capability /capabilityname:OpenSSH.Server~~~~0.0.1.0 /NoRestart | Out-Null
+        Write-Host "[!] Fallo Windows Update. Intentando via Chocolatey (Metodo Alternativo)..." -ForegroundColor Yellow
+        if (Get-Command choco -ErrorAction SilentlyContinue) {
+            choco install openssh -y -params '"/SSHServerFeature"' | Out-Null
+        } else {
+            Write-Host "[!] Chocolatey no detectado. Intentando via DISM..." -ForegroundColor Yellow
+            dism /online /add-capability /capabilityname:OpenSSH.Server~~~~0.0.1.0 /NoRestart | Out-Null
+        }
     }
 
     Write-Host "[*] Verificando existencia del servicio..."
     Start-Sleep -Seconds 3
     
-    if (-not (Get-Service -Name sshd -ErrorAction SilentlyContinue)) {
-        Write-Host "[!] El servicio no aparece. Buscando archivos en el sistema..." -ForegroundColor Yellow
-        $sshdExe = "C:\Windows\System32\OpenSSH\sshd.exe"
-        if (Test-Path $sshdExe) {
-            Write-Host "[*] Archivo detectado en System32. Registrando servicio manualmente..." -ForegroundColor Cyan
-            # Intentar usar el script de instalacion oficial de Windows si existe
-            if (Test-Path "C:\Windows\System32\OpenSSH\install-sshd.ps1") {
-                Set-Location "C:\Windows\System32\OpenSSH"
-                ./install-sshd.ps1 | Out-Null
-                Set-Location $PSScriptRoot
-            } else {
-                # Registro manual puro vía SC
-                sc.exe create sshd binPath= $sshdExe start= auto displayname= "OpenSSH SSH Server" | Out-Null
-            }
+    $service = Get-Service -Name sshd -ErrorAction SilentlyContinue
+    if (-not $service) {
+        Write-Host "[!] El servicio no aparece. Buscando ejecutables locales..." -ForegroundColor Yellow
+        # Buscar en rutas comunes (Nativo o Chocolatey)
+        $paths = @("C:\Windows\System32\OpenSSH\sshd.exe", "C:\Program Files\OpenSSH-Win64\sshd.exe", "C:\Program Files\OpenSSH\sshd.exe")
+        $sshdExe = ""
+        foreach ($p in $paths) { if (Test-Path $p) { $sshdExe = $p; break } }
+
+        if ($sshdExe -ne "") {
+            Write-Host "[*] Archivo detectado en $sshdExe. Registrando manualmente..." -ForegroundColor Cyan
+            sc.exe create sshd binPath= $sshdExe start= auto displayname= "OpenSSH SSH Server" | Out-Null
         } else {
-            Write-Host "[CRITICO] No se encontraron los archivos de OpenSSH en C:\Windows\System32\OpenSSH." -ForegroundColor Red
-            Write-Host "[TIP] Revisa si tienes conexion a internet, ya que Windows necesita descargar los archivos." -ForegroundColor Yellow
+            Write-Host "[CRITICO] No se encontraron archivos de OpenSSH en ninguna ruta conocida." -ForegroundColor Red
+            Write-Host "[TIP] Tu VM parece no tener acceso a Windows Update. Por favor, asegúrate de tener internet o instala Chocolatey primero." -ForegroundColor Yellow
             Pausa-Tecla
             return
         }
     }
 
     # Configurar y arrancar
-    if (Get-Service -Name sshd -ErrorAction SilentlyContinue) {
-        Write-Host "[OK] Servicio sshd registrado. Iniciando..." -ForegroundColor Green
+    $service = Get-Service -Name sshd -ErrorAction SilentlyContinue
+    if ($service) {
+        Write-Host "[OK] Servicio sshd encontrado. Configurando..." -ForegroundColor Green
         Set-Service -Name sshd -StartupType Automatic
-        Set-Service -Name ssh-agent -StartupType Automatic -ErrorAction SilentlyContinue
         Start-Service sshd -ErrorAction SilentlyContinue
-        Start-Service ssh-agent -ErrorAction SilentlyContinue
+        Write-Host "[OK] SSH listo y corriendo." -ForegroundColor Green
     } else {
         Write-Host "[!] No se pudo activar el servicio despues de todos los intentos." -ForegroundColor Red
         Pausa-Tecla
