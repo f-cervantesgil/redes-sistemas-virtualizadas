@@ -33,7 +33,7 @@ function Install-IIS {
         $appcmd = "$env:SystemRoot\system32\inetsrv\appcmd.exe"
         if (Test-Path $appcmd) {
             # Limpiar bindings previos y poner el nuevo
-            & $appcmd set site /site.name:"$siteName" /bindings:http/*:$Port: | Out-Null
+            & $appcmd set site /site.name:"$siteName" /bindings:http/*:${Port}: | Out-Null
         } else {
             # Fallback a PowerShell si no hay appcmd
             if (-not (Get-Website -Name "$siteName" -ErrorAction SilentlyContinue)) {
