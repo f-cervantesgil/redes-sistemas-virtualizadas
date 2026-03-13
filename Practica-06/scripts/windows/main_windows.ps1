@@ -4,146 +4,120 @@ $ErrorActionPreference = "Stop"
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
 
 $TargetIP = "192.168.222.197"
-$script:IisSiteName = "Default Web Site"
 $script:IisSitePath = "C:\inetpub\wwwroot"
+$script:ApachePath = "C:\tools\apache24"
+$script:NginxPath = "C:\tools\nginx"
 
 function Info   { param([string]$Msg) Write-Host "[INFO]  $Msg" -ForegroundColor Cyan }
 function Exito  { param([string]$Msg) Write-Host "[OK]    $Msg" -ForegroundColor Green }
 function Aviso  { param([string]$Msg) Write-Host "[AVISO] $Msg" -ForegroundColor Yellow }
-function ErrorX { param([string]$Msg) Write-Host "[ERROR] $Msg" -ForegroundColor Red }
 
-function Assert-Admin {
-    $id = [Security.Principal.WindowsIdentity]::GetCurrent()
-    $pr = [Security.Principal.WindowsPrincipal]::new($id)
-    if (-not $pr.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-        throw "Debes ejecutar este script como Administrador para configurar IIS."
-    }
-}
-
-# --- REQUERIMIENTO: SEGURIDAD Y PERMISOS DE USUARIO ---
+# --- SEGURIDAD NTFS (REQUERIMIENTO) ---
 function Set-RestrictedSecurity {
     param([string]$Path, [string]$User = "web_dedicated_user")
-    Info "Restringiendo permisos en $Path para el usuario $User..."
-    
+    Info "Aplicando restricciones NTFS en $Path para $User..."
+    if (-not (Test-Path $Path)) { New-Item -Path $Path -ItemType Directory -Force | Out-Null }
     if (-not (Get-LocalUser -Name $User -ErrorAction SilentlyContinue)) {
         $pass = ConvertTo-SecureString "P@ssw0rd2026!" -AsPlainText -Force
-        New-LocalUser -Name $User -Password $pass -Description "Usuario dedicado para servicios web" | Out-Null
+        New-LocalUser -Name $User -Password $pass -Description "Usuario dedicado web" | Out-Null
     }
-    
     $acl = Get-Acl $Path
-    $acl.SetAccessRuleProtection($true, $false) # Bloquear herencia
+    $acl.SetAccessRuleProtection($true, $false)
     $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule("Administrators","FullControl","ContainerInherit,ObjectInherit","None","Allow")))
     $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($User,"ReadAndExecute","ContainerInherit,ObjectInherit","None","Allow")))
     Set-Acl $Path $acl
 }
 
-# --- REQUERIMIENTO: HARDENING (OCULTAR VERSIONES) ---
-function Apply-Hardening {
-    param([string]$Service)
-    Info "Aplicando Hardening para $Service..."
-    $appcmd = "$env:SystemRoot\system32\inetsrv\appcmd.exe"
-    
-    if ($Service -eq "iis") {
-        # Ocultar X-Powered-By y aplicar cabeceras de seguridad
-        & $appcmd set config /section:httpProtocol /-"customHeaders.[name='X-Powered-By']" /commit:apphost 2>$null
-        & $appcmd set config /section:httpProtocol /+"customHeaders.[name='X-Frame-Options',value='SAMEORIGIN']" /commit:apphost 2>$null
-        & $appcmd set config /section:httpProtocol /+"customHeaders.[name='X-Content-Type-Options',value='nosniff']" /commit:apphost 2>$null
-        # Bloquear verbos inseguros
-        & $appcmd set config /section:requestFiltering /+"verbs.[verb='TRACE',allowed='false']" /commit:apphost 2>$null
-        & $appcmd set config /section:requestFiltering /+"verbs.[verb='DELETE',allowed='false']" /commit:apphost 2>$null
-    }
+# --- INDEX PERSONALIZADO ---
+function Create-IndexHtml {
+    param([string]$Path, [string]$Srv, [string]$Ver, [int]$Port)
+    $html = "<html><body style='font-family:Arial;text-align:center;'><h1>Servidor: [$Srv] - Version: [$Ver] - Puerto: [$Port]</h1></body></html>"
+    Set-Content -Path (Join-Path $Path "index.html") -Value $html -Force
 }
 
-function Ensure-IISMandatory {
-    Info "Verificando IIS..."
-    if (-not (Get-WindowsFeature -Name Web-Server).Installed) {
-        Install-WindowsFeature -Name Web-Server -IncludeManagementTools | Out-Null
-    }
-    Import-Module WebAdministration
-    
-    # Reparar sitio si esta dañado (Solucion al error 0x800710D8)
-    if (-not (Test-Path $script:IisSitePath)) { New-Item -Path $script:IisSitePath -ItemType Directory -Force | Out-Null }
-    
-    if (-not (Get-Website -Name $script:IisSiteName -ErrorAction SilentlyContinue)) {
-        New-Website -Name $script:IisSiteName -Port 80 -PhysicalPath $script:IisSitePath -Force | Out-Null
-    }
-    
-    # Reinicio forzado para asegurar registro de objetos
-    iisreset /stop | Out-Null
-    Start-Service AppHostSvc, WAS, W3SVC -ErrorAction SilentlyContinue
-    iisreset /start | Out-Null
-}
-
-function Set-IISPort {
+# --- CONFIGURACION IIS ---
+function Set-IIS {
     param([int]$Port)
-    Info "Configurando puerto $Port en IIS..."
+    Info "Configurando IIS..."
+    if (-not (Get-WindowsFeature -Name Web-Server).Installed) { Install-WindowsFeature -Name Web-Server | Out-Null }
+    Import-Module WebAdministration
+    iisreset /stop | Out-Null
     
-    # REQUERIMIENTO: Set-WebBinding -Name "Default Web Site" -BindingInformation "*:PUERTO:"
-    Set-WebBinding -Name $script:IisSiteName -BindingInformation "*:${Port}:" -PropertyName "Port" -Value 80 -ErrorAction SilentlyContinue
-    # Si el anterior falla porque no hay un binding en 80, creamos uno limpio
-    Get-WebBinding -Name $script:IisSiteName | Remove-WebBinding -ErrorAction SilentlyContinue
-    New-WebBinding -Name $script:IisSiteName -IPAddress "*" -Port $Port -Protocol "http" | Out-Null
+    # Requerimiento: Set-WebBinding
+    Get-WebBinding -Name "Default Web Site" | Remove-WebBinding -ErrorAction SilentlyContinue
+    New-WebBinding -Name "Default Web Site" -IPAddress "*" -Port $Port -Protocol "http" | Out-Null
     
-    # REQUERIMIENTO: index.html personalizado
-    $htmlContent = "<html><body><h1>Servidor: [IIS] - Version: [LTS] - Puerto: [$Port]</h1><p>Hardening y Seguridad NTFS aplicados.</p></body></html>"
-    Set-Content -Path (Join-Path $script:IisSitePath "index.html") -Value $htmlContent -Force
+    # Hardening
+    $appcmd = "$env:SystemRoot\system32\inetsrv\appcmd.exe"
+    & $appcmd set config /section:httpProtocol /-"customHeaders.[name='X-Powered-By']" /commit:apphost 2>$null
+    & $appcmd set config /section:httpProtocol /+"customHeaders.[name='X-Frame-Options',value='SAMEORIGIN']" /commit:apphost 2>$null
     
+    Create-IndexHtml -Path $script:IisSitePath -Srv "IIS" -Ver "LTS" -Port $Port
     Set-RestrictedSecurity -Path $script:IisSitePath
-    Apply-Hardening -Service "iis"
     
-    Restart-Website -Name $script:IisSiteName -ErrorAction SilentlyContinue
-    
-    # REQUERIMIENTO: Validacion con Test-NetConnection
-    Info "Validando puerto $Port..."
-    $check = Test-NetConnection -ComputerName $TargetIP -Port $Port -InformationLevel Quiet
-    if ($check) {
-        Exito "IIS operativo en http://${TargetIP}:${Port}"
-    } else {
-        Aviso "El puerto $Port no responde externamente. Revisa el Firewall."
-    }
+    iisreset /start | Out-Null
+    Exito "IIS listo en puerto $Port"
 }
 
-# --- CHOCOLATEY Y OTROS SERVICIOS ---
-function Ensure-Chocolatey {
-    if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
-        Info "Instalando Chocolatey..."
-        Set-ExecutionPolicy Bypass -Scope Process -Force
-        [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
-        iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
-    }
-}
-
-# --- MENU PRINCIPAL ---
-function Main {
-    Assert-Admin
-    Ensure-IISMandatory
-    Ensure-Chocolatey
+# --- CONFIGURACION APACHE ---
+function Set-Apache {
+    param([int]$Port)
+    Info "Configurando Apache..."
+    if (-not (Get-Command choco -ErrorAction SilentlyContinue)) { iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1')) }
+    if (-not (Test-Path $script:ApachePath)) { choco install apache-httpd --version 2.4.58 -y | Out-Null }
     
-    while ($true) {
-        Clear-Host
-        Write-Host "========================================" -ForegroundColor Cyan
-        Write-Host "  MENU DE ADMINISTRACION WEB (P6)" -ForegroundColor Cyan
-        Write-Host "  IP OBJETIVO: $TargetIP" -ForegroundColor Yellow
-        Write-Host "========================================"
-        Write-Host "1) Configurar IIS (Puerto + Hardening)"
-        Write-Host "2) Info Chocolatey Apache"
-        Write-Host "3) Salir"
-        Write-Host ""
-        
-        $choice = Read-Host "Selecciona una opcion"
-        switch ($choice) {
-            "1" {
-                $p = Read-Host "Ingresa el puerto"
-                Set-IISPort -Port [int]$p
-                Read-Host "Presiona Enter..."
-            }
-            "2" {
-                choco info apache --all
-                Read-Host "Presiona Enter..."
-            }
-            "3" { exit }
-        }
-    }
+    $conf = Join-Path $script:ApachePath "conf\httpd.conf"
+    (Get-Content $conf) -replace "^Listen\s+\d+", "Listen $Port" | Set-Content $conf
+    
+    Create-IndexHtml -Path (Join-Path $script:ApachePath "htdocs") -Srv "Apache" -Ver "2.4.58" -Port $Port
+    Set-RestrictedSecurity -Path (Join-Path $script:ApachePath "htdocs")
+    
+    Restart-Service Apache* -ErrorAction SilentlyContinue
+    Exito "Apache listo en puerto $Port"
 }
 
-Main
+# --- CONFIGURACION NGINX ---
+function Set-Nginx {
+    param([int]$Port)
+    Info "Configurando Nginx..."
+    if (-not (Test-Path $script:NginxPath)) { choco install nginx -y | Out-Null }
+    
+    $conf = Join-Path $script:NginxPath "conf\nginx.conf"
+    (Get-Content $conf) -replace "listen\s+\d+;", "listen $Port;" | Set-Content $conf
+    
+    Create-IndexHtml -Path (Join-Path $script:NginxPath "html") -Srv "Nginx" -Ver "1.24.0" -Port $Port
+    Set-RestrictedSecurity -Path (Join-Path $script:NginxPath "html")
+    
+    Stop-Process -Name nginx -ErrorAction SilentlyContinue
+    Start-Process -FilePath (Join-Path $script:NginxPath "nginx.exe") -WorkingDirectory $script:NginxPath
+    Exito "Nginx listo en puerto $Port"
+}
+
+# --- MENU ---
+while ($true) {
+    Clear-Host
+    Write-Host "============================" -ForegroundColor Cyan
+    Write-Host "   MENU WEB WINDOWS (P6)" -ForegroundColor Cyan
+    Write-Host "   IP: $TargetIP"
+    Write-Host "============================"
+    Write-Host "1) Configurar IIS"
+    Write-Host "2) Configurar Apache"
+    Write-Host "3) Configurar Nginx"
+    Write-Host "4) Salir"
+    
+    $op = Read-Host "`nOpcion"
+    if ($op -eq "4") { exit }
+    
+    $pString = Read-Host "Puerto"
+    $p = [int]$pString # Conversion limpia para evitar errores
+    
+    switch ($op) {
+        "1" { Set-IIS -Port $p }
+        "2" { Set-Apache -Port $p }
+        "3" { Set-Nginx -Port $p }
+    }
+    
+    Info "Validando conectividad en $TargetIP : $p..."
+    Test-NetConnection -ComputerName $TargetIP -Port $p
+    Read-Host "`nEnter para volver al menu..."
+}
