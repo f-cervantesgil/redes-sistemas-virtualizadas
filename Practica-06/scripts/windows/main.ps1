@@ -62,7 +62,7 @@ function Install-IIS {
         
         # Cambiamos el puerto y nos aseguramos que sea universal (*)
         Set-WebBinding -Name "$sn" -BindingInformation "$oldInfo" -PropertyName "Port" -Value $Port -ErrorAction SilentlyContinue
-        Set-WebBinding -Name "$sn" -BindingInformation "*:$Port:" -PropertyName "IPAddress" -Value "*" -ErrorAction SilentlyContinue
+        Set-WebBinding -Name "$sn" -BindingInformation "*:${Port}:" -PropertyName "IPAddress" -Value "*" -ErrorAction SilentlyContinue
 
         # 3. Hardening (Cabeceras y Verbos)
         Remove-WebConfigurationProperty -pspath 'MACHINE/WEBROOT/APPHOST' -filter "system.webServer/httpProtocol/customHeaders" -name "X-Powered-By" -ErrorAction SilentlyContinue
