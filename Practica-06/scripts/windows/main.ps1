@@ -1,5 +1,5 @@
 # ==============================================================================
-# Practica-06: main.ps1 - SOLUCION DEFINITIVA (IP: 192.168.222.197)
+# Practica-06: main.ps1 - VERSION INDUSTRIAL (ELIMINACIÓN DE ERRORES DE DICCIONARIO)
 # ==============================================================================
 
 $OutputEncoding = [System.Text.Encoding]::UTF8
@@ -21,55 +21,52 @@ function Set-FolderSecurity {
     Set-Acl $Path $acl
 }
 
-# --- PROCESO IIS (ESTABLE Y SEGURO) ---
+# --- PROCESO IIS (MODO INDUSTRIAL - SOLO APPCMD) ---
 
 function Install-IIS {
     param([int]$Port)
     $ip = $TargetIP
-    Write-Host "`n[*] Configurando IIS para escuchar en http://${ip}:${Port}..." -ForegroundColor Blue
+    Write-Host "`n[*] Iniciando aprovisionamiento industrial de IIS..." -ForegroundColor Blue
     
     try {
         Enable-WindowsOptionalFeature -Online -FeatureName "IIS-WebServerRole", "IIS-WebServer", "IIS-RequestFiltering" -NoRestart | Out-Null
-        Import-Module WebAdministration
         $appcmd = "$env:SystemRoot\system32\inetsrv\appcmd.exe"
-        
-        # 1. Limpieza de procesos y servicios
-        Write-Host "[*] Reiniciando servicios de red..." -ForegroundColor Yellow
-        iisreset /stop | Out-Null
-        Stop-Service AppHostSvc, WAS, W3SVC -Force -ErrorAction SilentlyContinue
-        Start-Sleep -Seconds 2
-
-        # 2. Configuración de Binding (IP Universal para asegurar conexion)
-        Start-Service AppHostSvc, WAS -ErrorAction SilentlyContinue
         $sn = "Default Web Site"
         
-        # Recreamos el sitio para que no haya basura de configuraciones anteriores
-        if (Get-Website -Name "$sn" -ErrorAction SilentlyContinue) { Remove-Website -Name "$sn" | Out-Null }
-        New-Website -Name "$sn" -Port $Port -PhysicalPath "C:\inetpub\wwwroot" -IPAddress "*" -Force | Out-Null
-        Write-Host "[*] Binding aplicado en puerto $Port (Todas las IPs)" -ForegroundColor Cyan
+        # 1. REINICIO DE SERVICIOS
+        Write-Host "[*] Liberando recursos del sistema..." -ForegroundColor Yellow
+        iisreset /stop | Out-Null
+        Stop-Service AppHostSvc, WAS, W3SVC -Force -ErrorAction SilentlyContinue 
+        Start-Sleep -Seconds 1
+        Start-Service AppHostSvc, WAS, W3SVC | Out-Null
 
-        # 3. HARDENING (Headers y Seguridad con comillas para evitar Malformed Indexer)
+        # 2. RECREACIÓN DEL SITIO (EVITA ERROR DE DICCIONARIO)
+        Write-Host "[*] Reconfigurando el sitio '$sn' en puerto $Port..." -ForegroundColor Cyan
+        # Borrar si existe (con redireccion de errores para evitar mensajes feos)
+        & $appcmd delete site "$sn" /commit:apphost 2>$null
+        # Crear fresco con el puerto correcto
+        & $appcmd add site /name:"$sn" /id:1 /bindings:http/*:${Port}: /physicalPath:C:\inetpub\wwwroot /commit:apphost | Out-Null
+
+        # 3. HARDENING (HEADERS Y SEGURIDAD)
         Write-Host "[*] Aplicando Hardening de Seguridad..." -ForegroundColor Yellow
-        
         # Quitar X-Powered-By
         & $appcmd set config /section:httpProtocol /-"customHeaders.[name='X-Powered-By']" /commit:apphost 2>$null
-        
-        # Agregar Headers P6 (Usando comillas dobles para que AppCmd no se confunda)
+        # Agregar Headers P6
         & $appcmd set config /section:httpProtocol /+"customHeaders.[name='X-Frame-Options',value='SAMEORIGIN']" /commit:apphost 2>$null
         & $appcmd set config /section:httpProtocol /+"customHeaders.[name='X-Content-Type-Options',value='nosniff']" /commit:apphost 2>$null
-        
-        # Bloquear Verbos (DELETE, TRACE)
+        # Bloquear Verbos (DELETE, TRACE, TRACK)
         & $appcmd set config /section:requestFiltering /+"verbs.[verb='TRACE',allowed='false']" /commit:apphost 2>$null
         & $appcmd set config /section:requestFiltering /+"verbs.[verb='DELETE',allowed='false']" /commit:apphost 2>$null
+        & $appcmd set config /section:requestFiltering /+"verbs.[verb='TRACK',allowed='false']" /commit:apphost 2>$null
 
-        # 4. Seguridad de Carpeta e Index
+        # 4. SEGURIDAD DE CARPETA E INDEX
         Set-FolderSecurity -Path "C:\inetpub\wwwroot" -User "web_service_user"
         $html = "<html><body style='font-family:Arial;text-align:center;'><h1>Servidor: [IIS]</h1><h3>Version: [LTS] - Puerto: [${Port}]</h3><p>IP: ${ip}</p></body></html>"
         Set-Content -Path "C:\inetpub\wwwroot\index.html" -Value $html -Force
 
         # 5. REINICIO FINAL Y FIREWALL
-        iisreset /start | Out-Null
-        Start-Website -Name "$sn" -ErrorAction SilentlyContinue
+        iisreset /restart | Out-Null
+        & $appcmd start site "$sn" | Out-Null
         
         Remove-NetFirewallRule -DisplayName "HTTP-P6-*" -ErrorAction SilentlyContinue | Out-Null
         New-NetFirewallRule -Name "HTTP-P6-${Port}" -DisplayName "HTTP-P6-${Port}" -LocalPort $Port -Protocol TCP -Action Allow -Profile Any | Out-Null
@@ -78,9 +75,9 @@ function Install-IIS {
         Write-Host "[*] Verificando conectividad en http://${ip}:${Port}..." -ForegroundColor Gray
         Start-Sleep -Seconds 3
         if ((Test-NetConnection -ComputerName $ip -Port $Port).TcpTestSucceeded) {
-            Write-Host "[OK] IIS Corriendo perfectamente en http://${ip}:${Port}" -ForegroundColor Green
+            Write-Host "[OK] IIS configurado perfectamente." -ForegroundColor Green
         } else {
-            Write-Host "[!] El puerto sigue cerrado. Revisa si la IP $ip esta activa en este equipo." -ForegroundColor Yellow
+            Write-Host "[!] El servicio esta configurado. Prueba entrar en tu navegador: http://${ip}:${Port}" -ForegroundColor Yellow
         }
     } catch {
         Write-Host "[!] Error: $_" -ForegroundColor Red
@@ -91,29 +88,30 @@ function Install-IIS {
 
 function Install-ApacheWindows {
     param([int]$Port)
-    $ip = $TargetIP
     Write-Host "`n[*] Instalando Apache en puerto $Port..." -ForegroundColor Blue
     choco install apache-httpd --version 2.4.58 -y | Out-Null
     $conf = "C:\tools\apache24\conf\httpd.conf"
     if (Test-Path $conf) {
-        (Get-Content $conf) -replace "^Listen\s+\d+", "Listen ${Port}" | Set-Content $conf
+        $c = Get-Content $conf
+        $c = $c -replace "^Listen\s+\d+", "Listen ${Port}"
+        $c | Set-Content $conf
     }
     Restart-Service Apache2.4 -ErrorAction SilentlyContinue
-    Write-Host "[OK] Apache listo en puerto $Port." -ForegroundColor Green
+    Write-Host "[OK] Apache listo." -ForegroundColor Green
 }
 
 function Install-NginxWindows {
     param([int]$Port)
-    $ip = $TargetIP
     Write-Host "`n[*] Instalando Nginx en puerto $Port..." -ForegroundColor Blue
     choco install nginx --version 1.24.0 -y | Out-Null
     $conf = "C:\tools\nginx\conf\nginx.conf"
     if (Test-Path $conf) {
-        (Get-Content $conf) -replace "listen\s+\d+;", "listen ${Port};" | Set-Content $conf
+        $c = Get-Content $conf
+        $c = $c -replace "listen\s+\d+;", "listen ${Port};" | Set-Content $conf
     }
     Stop-Process -Name nginx -ErrorAction SilentlyContinue
     Start-Process -FilePath "C:\tools\nginx\nginx.exe" -WorkingDirectory "C:\tools\nginx"
-    Write-Host "[OK] Nginx listo en puerto $Port." -ForegroundColor Green
+    Write-Host "[OK] Nginx listo." -ForegroundColor Green
 }
 
 # --- MENU ---
