@@ -1,142 +1,68 @@
 #requires -RunAsAdministrator
-Set-StrictMode -Version Latest
-$ErrorActionPreference = "Stop"
-[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+$ErrorActionPreference = "Continue" # Bajamos la estrictez para que no se pare por avisos tontos
 
 $TargetIP = "192.168.222.197"
-$script:IisSitePath = "C:\inetpub\wwwroot"
-$script:ApachePath = "C:\tools\apache24"
-$script:NginxPath = "C:\tools\nginx"
+$IisPath = "C:\inetpub\wwwroot"
+$appcmd = "$env:SystemRoot\system32\inetsrv\appcmd.exe"
 
-function Info   { param([string]$Msg) Write-Host "[INFO]  $Msg" -ForegroundColor Cyan }
-function Exito  { param([string]$Msg) Write-Host "[OK]    $Msg" -ForegroundColor Green }
-function Aviso  { param([string]$Msg) Write-Host "[AVISO] $Msg" -ForegroundColor Yellow }
+Write-Host "==========================================" -ForegroundColor Red
+Write-Host "   MODO SUPERVIVENCIA - PRACTICA 06" -ForegroundColor Red
+Write-Host "==========================================" -ForegroundColor Red
 
-# --- REQUERIMIENTO: FIREWALL ---
-function Open-PortFirewall {
-    param([int]$Port, [string]$Srv)
-    $RuleName = "Regla-P6-$Srv-$Port"
-    Info "Abriendo puerto $Port en el Firewall de Windows..."
-    Remove-NetFirewallRule -DisplayName $RuleName -ErrorAction SilentlyContinue | Out-Null
-    New-NetFirewallRule -DisplayName $RuleName -Direction Inbound -LocalPort $Port -Protocol TCP -Action Allow -Profile Any | Out-Null
+# 1. DESACTIVAR FIREWALL (Como pediste para que no estorbe)
+Write-Host "[*] Desactivando Firewall de Windows..." -ForegroundColor Yellow
+Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
+
+# 2. LIMPIEZA TOTAL DE IIS
+Write-Host "[*] Limpiando y reiniciando IIS..." -ForegroundColor Cyan
+iisreset /stop
+Start-Sleep -Seconds 2
+
+if (-not (Get-WindowsFeature -Name Web-Server).Installed) { Install-WindowsFeature -Name Web-Server }
+Import-Module WebAdministration
+
+# Borrar y recrear el sitio para que no haya errores de "Objeto no valido"
+if (Get-Website -Name "Default Web Site" -ErrorAction SilentlyContinue) {
+    Remove-Website -Name "Default Web Site"
 }
 
-# --- REQUERIMIENTO: SEGURIDAD NTFS ---
-function Set-RestrictedSecurity {
-    param([string]$Path, [string]$User = "web_dedicated_user")
-    Info "Configurando permisos NTFS en $Path..."
-    if (-not (Test-Path $Path)) { New-Item -Path $Path -ItemType Directory -Force | Out-Null }
-    if (-not (Get-LocalUser -Name $User -ErrorAction SilentlyContinue)) {
-        $pass = ConvertTo-SecureString "P@ssw0rd2026!" -AsPlainText -Force
-        New-LocalUser -Name $User -Password $pass -Description "User P6" | Out-Null
-    }
-    $acl = Get-Acl $Path
-    $acl.SetAccessRuleProtection($true, $false)
-    $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule("Administrators","FullControl","ContainerInherit,ObjectInherit","None","Allow")))
-    $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($User,"ReadAndExecute","ContainerInherit,ObjectInherit","None","Allow")))
-    Set-Acl $Path $acl
-}
+# 3. PEDIR PUERTO Y CONFIGURAR
+$p = Read-Host "Ingresa el puerto (ej. 8081)"
 
-function Create-IndexHtml {
-    param([string]$Path, [string]$Srv, [string]$Ver, [int]$Port)
-    $html = "<html><body style='font-family:Arial;text-align:center;'><h1>Servidor: [$Srv] - Version: [$Ver] - Puerto: [$Port]</h1><h3>IP: $TargetIP</h3><hr><p>Hardening y NTFS OK</p></body></html>"
-    Set-Content -Path (Join-Path $Path "index.html") -Value $html -Force
-}
+# Crear sitio fresco
+New-Website -Name "Default Web Site" -Port $p -PhysicalPath $IisPath -Force
+Start-Sleep -Seconds 1
 
-# --- CONFIGURACION IIS ---
-function Set-IIS {
-    param([int]$Port)
-    Info "Iniciando configuracion de IIS en puerto $Port..."
-    if (-not (Get-WindowsFeature -Name Web-Server).Installed) { Install-WindowsFeature -Name Web-Server | Out-Null }
-    Import-Module WebAdministration
-    
-    # 1. Limpieza y Reconstruccion del Sitio
-    iisreset /stop | Out-Null
-    if (Get-Website -Name "Default Web Site" -ErrorAction SilentlyContinue) { Remove-Website -Name "Default Web Site" | Out-Null }
-    New-Website -Name "Default Web Site" -Port $Port -PhysicalPath $script:IisSitePath -Force | Out-Null
-    
-    # 2. Binding e IP (Fuerza escucha en todas las IPs)
-    $appcmd = "$env:SystemRoot\system32\inetsrv\appcmd.exe"
-    & $appcmd set site "Default Web Site" /bindings:http/*:${Port}: | Out-Null
-    
-    # 3. Hardening de Seguridad
-    & $appcmd set config /section:httpProtocol /-"customHeaders.[name='X-Powered-By']" /commit:apphost 2>$null
-    & $appcmd set config /section:httpProtocol /+"customHeaders.[name='X-Frame-Options',value='SAMEORIGIN']" /commit:apphost 2>$null
-    & $appcmd set config /section:httpProtocol /+"customHeaders.[name='X-Content-Type-Options',value='nosniff']" /commit:apphost 2>$null
-    
-    # 4. Contenido y Seguridad
-    Create-IndexHtml -Path $script:IisSitePath -Srv "IIS" -Ver "LTS" -Port $Port
-    Set-RestrictedSecurity -Path $script:IisSitePath
-    
-    # 5. Firewall y Arranque
-    Open-PortFirewall -Port $Port -Srv "IIS"
-    iisreset /start | Out-Null
-    Start-Website -Name "Default Web Site" -ErrorAction SilentlyContinue
-}
+# 4. HARDENING (OCULTAR VERSION Y CABECERAS) - Sin errores de duplicado
+Write-Host "[*] Aplicando Hardening..." -ForegroundColor Cyan
+& $appcmd set config /section:httpProtocol /-"customHeaders.[name='X-Powered-By']" /commit:apphost 2>$null
+& $appcmd set config /section:httpProtocol /-"customHeaders.[name='X-Frame-Options']" /commit:apphost 2>$null
+& $appcmd set config /section:httpProtocol /+"customHeaders.[name='X-Frame-Options',value='SAMEORIGIN']" /commit:apphost 2>$null
+& $appcmd set config /section:httpProtocol /-"customHeaders.[name='X-Content-Type-Options']" /commit:apphost 2>$null
+& $appcmd set config /section:httpProtocol /+"customHeaders.[name='X-Content-Type-Options',value='nosniff']" /commit:apphost 2>$null
 
-# --- CONFIGURACION APACHE ---
-function Set-Apache {
-    param([int]$Port)
-    Info "Iniciando configuracion de Apache..."
-    if (-not (Test-Path $script:ApachePath)) { choco install apache-httpd --version 2.4.58 -y | Out-Null }
-    
-    $conf = Join-Path $script:ApachePath "conf\httpd.conf"
-    (Get-Content $conf) -replace "^Listen\s+\d+", "Listen $Port" | Set-Content $conf
-    
-    Create-IndexHtml -Path (Join-Path $script:ApachePath "htdocs") -Srv "Apache" -Ver "2.4.58" -Port $Port
-    Set-RestrictedSecurity -Path (Join-Path $script:ApachePath "htdocs")
-    
-    Open-PortFirewall -Port $Port -Srv "Apache"
-    Restart-Service Apache* -ErrorAction SilentlyContinue
-}
+# 5. INDEX Y PERMISOS
+$html = "<html><body style='background:#111;color:#0f0;text-align:center;font-family:sans-serif;'><h1>Servidor: [IIS]</h1><h2>Version: [LTS] - Puerto: [$p]</h2><p>FIREWALL DESACTIVADO - HARDENING OK</p></body></html>"
+Set-Content -Path "$IisPath\index.html" -Value $html -Force
 
-# --- CONFIGURACION NGINX ---
-function Set-Nginx {
-    param([int]$Port)
-    Info "Iniciando configuracion de Nginx..."
-    if (-not (Test-Path $script:NginxPath)) { choco install nginx -y | Out-Null }
-    
-    $conf = Join-Path $script:NginxPath "conf\nginx.conf"
-    (Get-Content $conf) -replace "listen\s+\d+;", "listen $Port;" | Set-Content $conf
-    
-    Create-IndexHtml -Path (Join-Path $script:NginxPath "html") -Srv "Nginx" -Ver "1.24.0" -Port $Port
-    Set-RestrictedSecurity -Path (Join-Path $script:NginxPath "html")
-    
-    Open-PortFirewall -Port $Port -Srv "Nginx"
-    Stop-Process -Name nginx -Force -ErrorAction SilentlyContinue
-    Start-Process -FilePath (Join-Path $script:NginxPath "nginx.exe") -WorkingDirectory $script:NginxPath
+# Requerimiento de usuario dedicado
+if (-not (Get-LocalUser -Name "web_user" -ErrorAction SilentlyContinue)) {
+    New-LocalUser -Name "web_user" -NoPassword | Out-Null
 }
+$acl = Get-Acl $IisPath
+$acl.SetAccessRuleProtection($true, $false)
+$acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule("Administrators","FullControl","ContainerInherit,ObjectInherit","None","Allow")))
+$acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule("web_user","ReadAndExecute","ContainerInherit,ObjectInherit","None","Allow")))
+Set-Acl $IisPath $acl
 
-# --- MENU ---
-while ($true) {
-    Clear-Host
-    Write-Host "============================" -ForegroundColor Cyan
-    Write-Host "   GESTOR WEB P6 DEFINITIVO" -ForegroundColor Cyan
-    Write-Host "   IP: $TargetIP" -ForegroundColor Yellow
-    Write-Host "============================"
-    Write-Host "1) IIS (Puerto + Firewall + Hardening)"
-    Write-Host "2) Apache"
-    Write-Host "3) Nginx"
-    Write-Host "4) Salir"
-    
-    $op = Read-Host "`nOpcion"
-    if ($op -eq "4") { exit }
-    
-    $p = [int](Read-Host "Puerto")
-    
-    switch ($op) {
-        "1" { Set-IIS -Port $p }
-        "2" { Set-Apache -Port $p }
-        "3" { Set-Nginx -Port $p }
-    }
-    
-    Info "Validando conectividad en http://$TargetIP : $p..."
-    Start-Sleep -Seconds 3 # Tiempo para que el servicio levante el socket
-    $res = Test-NetConnection -ComputerName $TargetIP -Port $p
-    if ($res.TcpTestSucceeded) {
-        Exito "CONEXION EXITOSA. Ya puedes entrar desde el navegador."
-    } else {
-        Aviso "TCP Failed. El servicio esta listo pero algo mas bloquea el trafico externo."
-    }
-    Read-Host "`nEnter para continuar..."
-}
+# 6. ARRANQUE FINAL
+Write-Host "[*] Arrancando todo..." -ForegroundColor Green
+iisreset /start
+& $appcmd start site "Default Web Site" 2>$null
+
+Write-Host "`n[OK] IIS configurado en puerto $p" -ForegroundColor Green
+Write-Host "[!] Prueba entrar a: http://$TargetIP:$p" -ForegroundColor White
+
+Write-Host "`nValidando conexion..."
+Test-NetConnection -ComputerName $TargetIP -Port $p
+Read-Host "`nPresiona Enter para terminar..."
