@@ -199,7 +199,7 @@ http {
         add_header X-Content-Type-Options "nosniff"       always;
         add_header X-XSS-Protection       "1; mode=block" always;
 
-        if ($request_method !~ ^(GET|POST|HEAD|OPTIONS)$) {
+        if (`$request_method !~ ^(GET|POST|HEAD|OPTIONS)`$) {
             return 405;
         }
 
@@ -279,7 +279,7 @@ function Show-PortsStatus {
         Select-Object LocalPort, OwningProcess |
         ForEach-Object {
             $proc = Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue
-            [PSCustomObject]@{ Puerto=$.LocalPort; PID=$.OwningProcess; Proceso=$proc.Name }
+            [PSCustomObject]@{ Puerto=$_.LocalPort; PID=$_.OwningProcess; Proceso=$proc.Name }
         } |
         Where-Object { $_.Puerto -in @(80,443,999,8080,8081,8082,8083,8084,8085,8086,8087,8088,8888,9090,$apachePuerto,$nginxPuerto,$iisPuerto) } |
         Sort-Object Puerto -Unique |
@@ -458,7 +458,7 @@ function Show-FreePortsMenu {
                 Select-Object LocalPort, OwningProcess |
                 ForEach-Object {
                     $proc = Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue
-                    [PSCustomObject]@{ Puerto=$.LocalPort; PID=$.OwningProcess; Proceso=$proc.Name }
+                    [PSCustomObject]@{ Puerto=$_.LocalPort; PID=$_.OwningProcess; Proceso=$proc.Name }
                 } |
                 Where-Object { $_.Puerto -lt 10000 } |
                 Sort-Object Puerto -Unique |
@@ -510,3 +510,6 @@ function Main {
         Read-Host "  Presiona ENTER para volver al menu"
     }
 }
+
+# Invocar el punto de entrada
+Main
