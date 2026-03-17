@@ -349,13 +349,14 @@ function Show-ChangePortMenu {
             Import-Module WebAdministration -ErrorAction SilentlyContinue
             Get-WebBinding -Name "Default Web Site" -Protocol http |
                 Remove-WebBinding -ErrorAction SilentlyContinue
-            New-WebBinding -Name "Default Web Site" -Protocol http -Port $p -IPAddress "*"
+            New-WebBinding -Name "Default Web Site" -Protocol http -Port $p
             # Actualizar index.html
             Set-Content "$script:IIS_WEBROOT\index.html" "<html><head><meta charset='UTF-8'><title>IIS - Practica 6</title><style>body{font-family:Segoe UI;background:#1a1a2e;color:#eee;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.card{background:#16213e;border-radius:12px;padding:40px 60px;text-align:center}h1{color:#4fc3f7}.badge{background:#e94560;color:#fff;border-radius:6px;padding:4px 14px;margin:4px;display:inline-block}</style></head><body><div class='card'><h1>IIS</h1><span class='badge'>Servidor: IIS</span><span class='badge'>Version: 10.0</span><span class='badge'>Puerto: $p</span></div></body></html>"
             Set-FirewallRule -Puerto $p -Servicio "IIS"
             Restart-Service W3SVC -ErrorAction SilentlyContinue
             Start-Website -Name "Default Web Site" -ErrorAction SilentlyContinue
-            Write-Ok "Puerto IIS cambiado a $p."
+            Write-Ok "Puerto IIS cambiado a $p. Esperando a que el servicio responda..."
+            Start-Sleep -Seconds 3
             curl.exe -I "http://localhost:$p"
         }
         "2" {

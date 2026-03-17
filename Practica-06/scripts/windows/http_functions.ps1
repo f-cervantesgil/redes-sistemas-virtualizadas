@@ -408,7 +408,7 @@ function Install-IIS {
             Write-Ok "Binding default (80) removido."
         }
         Remove-WebBinding -Name "Default Web Site" -Port $Puerto -Protocol http -ErrorAction SilentlyContinue
-        New-WebBinding    -Name "Default Web Site" -Protocol http -Port $Puerto -IPAddress "*"
+        New-WebBinding    -Name "Default Web Site" -Protocol http -Port $Puerto
         Write-Ok "Binding IIS en puerto $Puerto configurado."
     }
 
