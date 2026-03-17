@@ -303,23 +303,30 @@ function Show-PortsStatus {
 
     # Puertos realmente en escucha en el sistema
     Write-Host "  Puertos en escucha (red):" -ForegroundColor Cyan
-    $p_check = @("80","443","999","8080","8081","8082","8083","8084","8085","8086","8087","8088","8888","9090",[string]$apachePuerto,[string]$nginxPuerto,[string]$iisPuerto)
     
+    # Lista de puertos a buscar (asegurar que sean strings)
+    $p_check = @("80","443","999","8080","8081","8082","8083","8084","8085","8086","8087","8088","8888","9090")
+    if ($apachePuerto -ne "?") { $p_check += [string]$apachePuerto }
+    if ($nginxPuerto  -ne "?") { $p_check += [string]$nginxPuerto }
+    if ($iisPuerto    -ne "?") { $p_check += [string]$iisPuerto }
+
     Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
         Select-Object LocalPort, OwningProcess |
         ForEach-Object {
-            $pid_num = $_.OwningProcess
-            $procName = ""
-            if ($pid_num -eq 4) {
-                $procName = "System (IIS/HTTP.SYS)"
-            } else {
-                $proc = Get-Process -Id $pid_num -ErrorAction SilentlyContinue
-                if ($proc) { $procName = $proc.Name }
+            $p_num = [string]$_.LocalPort
+            if ($p_num -in $p_check) {
+                $pid_num = $_.OwningProcess
+                $procName = ""
+                if ($pid_num -eq 4) {
+                    $procName = "System (IIS/HTTP.SYS)"
+                } else {
+                    $proc = Get-Process -Id $pid_num -ErrorAction SilentlyContinue
+                    if ($proc) { $procName = $proc.Name }
+                }
+                [PSCustomObject]@{ Puerto=$p_num; PID=$pid_num; Proceso=$procName }
             }
-            [PSCustomObject]@{ Puerto=$_.LocalPort; PID=$pid_num; Proceso=$procName }
         } |
-        Where-Object { [string]$_.Puerto -in $p_check } |
-        Sort-Object Puerto -Unique |
+        Sort-Object { [int]$_.Puerto } -Unique |
         Format-Table -AutoSize
 }
 

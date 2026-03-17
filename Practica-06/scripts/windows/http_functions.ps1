@@ -393,23 +393,25 @@ function Install-IIS {
     if (-not $iisVer) { $iisVer = "10.0 (WS2022)" }
     Write-Ok "IIS listo. Version: $iisVer"
 
-    # Asegurar que el servicio base este corriendo antes de interactuar con los sitios
-    Start-Service W3SVC -ErrorAction SilentlyContinue
-    Set-Service   W3SVC -StartupType Automatic
-
-    # --- RE-CREACION FORZOSA DEL SITIO PARA ASEGURAR BINDING ---
-    if (Get-Website -Name "Default Web Site" -ErrorAction SilentlyContinue) {
-        Remove-Website -Name "Default Web Site" -ErrorAction SilentlyContinue
-        Write-Info "Sitio anterior removido para limpieza de bindings."
-    }
+    # --- RE-CREACION FORZOSA DEL SITIO (NIVEL APPCMD) ---
+    $appcmd = "$env:SystemRoot\system32\inetsrv\appcmd.exe"
+    
+    Write-Info "Eliminando sitio actual para limpieza total..."
+    & $appcmd delete site "Default Web Site" 2>$null | Out-Null
+    
+    # Limpiar cualquier reserva de URL que choque con el puerto
+    Write-Info "Limpiando reservaciones de puerto $Puerto en el Kernel..."
+    netsh http delete urlacl url=http://*:$Puerto/ 2>$null | Out-Null
+    netsh http delete urlacl url=http://+:$Puerto/ 2>$null | Out-Null
     
     if (-not (Test-Path "C:\inetpub\wwwroot")) { 
         New-Item -ItemType Directory -Path "C:\inetpub\wwwroot" -Force | Out-Null 
     }
     
-    # Crear el sitio con el puerto objetivo de una vez
-    New-Website -Name "Default Web Site" -Port $Puerto -PhysicalPath "C:\inetpub\wwwroot" -Force | Out-Null
-    Write-Ok "Sitio 'Default Web Site' recreado en puerto $Puerto."
+    # Crear sitio usando binding explicito 0.0.0.0 (estilo Apache)
+    Write-Info "Creando sitio con binding forzado en 0.0.0.0:$Puerto..."
+    & $appcmd add site /name:"Default Web Site" /id:1 /bindings:http/0.0.0.0:$($Puerto): /physicalPath:"C:\inetpub\wwwroot" 2>$null | Out-Null
+    Write-Ok "Sitio 'Default Web Site' recreado (appcmd) en puerto $Puerto."
 
     Set-IISSecurity        -SiteName "Default Web Site"
     Set-WebRootPermissions -Webroot "C:\inetpub\wwwroot" -ServiceUser "IIS_IUSRS"
@@ -475,33 +477,26 @@ function Set-IISSecurity {
             -Action       Allow `
             -Profile      Any `
             -ErrorAction  Stop | Out-Null
-        Write-Ok "Regla de firewall creada: TCP $puerto abierto para IIS (todos los perfiles)."
-    }
-
     # --- REESTABLECIMIENTO TOTAL DE RED (FUERZA BRUTA) ---
     Write-Info "Reseteando enchufe de red IIS (HTTP.SYS)..."
-    # Eliminar cualquier lista restringida de IPs que impida escuchar en el puerto nuevo
+    # Forzar que el kernel escuche en todas las interfaces
     netsh http delete iplisten ipaddress=0.0.0.0 2>$null | Out-Null
-    netsh http delete iplisten ipaddress=127.0.0.1 2>$null | Out-Null
+    netsh http add iplisten ipaddress=0.0.0.0 2>$null | Out-Null
     
-    # Detener y arrancar servicios en orden de dependencia
+    # Matar procesos si estan bloqueando el reinicio
     Stop-Service W3SVC -Force -ErrorAction SilentlyContinue
     Stop-Service WAS -Force -ErrorAction SilentlyContinue
+    Get-Process w3wp -ErrorAction SilentlyContinue | Stop-Process -Force
     Start-Sleep -Seconds 2
     
     Start-Service WAS -ErrorAction SilentlyContinue
     Start-Service W3SVC -ErrorAction SilentlyContinue
     
-    Import-Module WebAdministration -ErrorAction SilentlyContinue
-    $site = Get-Website -Name $SiteName -ErrorAction SilentlyContinue
-    if ($site) {
-        # Forzar inicio de pool y sitio sin estados fantasmas
-        $pool = $site.applicationPool
-        if ($pool) {
-            & "$env:SystemRoot\system32\inetsrv\appcmd.exe" start apppool /apppool.name:"$pool" 2>$null | Out-Null
-        }
-        Start-Website -Name $SiteName -ErrorAction SilentlyContinue
-    }
+    # Forzar inicio de AppPool y Website via AppCmd
+    $appcmd = "$env:SystemRoot\system32\inetsrv\appcmd.exe"
+    & $appcmd start apppool /apppool.name:"DefaultAppPool" 2>$null | Out-Null
+    & $appcmd start site "Default Web Site" 2>$null | Out-Null
+    
     Write-Ok "IIS reiniciado y enchufe de red forzado."
 }
 
