@@ -521,14 +521,13 @@ function Install-ApacheWindows {
     $confFile = "$apacheDir\conf\httpd.conf"
     $webroot  = "$apacheDir\htdocs"
 
-    # Reemplazar Listen: forzar escucha en TODAS las interfaces (0.0.0.0)
-    # Esto es clave para poder conectarse desde fuera de la VM
-    $confContent = Get-Content $confFile
-    $confContent = $confContent -replace '^Listen\s+.*', "Listen 0.0.0.0:$Puerto"
-    $confContent = $confContent -replace '^ServerName\s+.*', "ServerName localhost:$Puerto"
-    # Eliminar cualquier linea que fuerce solo 127.0.0.1
-    $confContent = $confContent -replace '^Listen\s+127\.0\.0\.1:\d+', "Listen 0.0.0.0:$Puerto"
+    # Limpiar cualquier Listen y ServerName existente (para evitar duplicados que crashean Apache)
+    $confContent = Get-Content $confFile | Where-Object { $_ -notmatch '^\s*Listen\s' -and $_ -notmatch '^\s*ServerName\s' }
+    
+    # Insertar al inicio para garantizar que sean tomadas y unicas
+    $confContent = @("Listen 0.0.0.0:$Puerto", "ServerName localhost:$Puerto") + $confContent
     $confContent | Set-Content $confFile
+    
     Write-Ok "Puerto $Puerto aplicado en httpd.conf (escuchando en 0.0.0.0:$Puerto - accesible desde fuera de la VM)."
 
     Set-ApacheSecurity     -ConfFile $confFile
@@ -553,6 +552,13 @@ function Install-ApacheWindows {
 
 function Set-ApacheSecurity {
     param([string]$ConfFile)
+
+    # Prevenir que el bloque se agregue multiples veces en multiples ejecuciones del script
+    $check = Get-Content $ConfFile | Select-String -Pattern "Seguridad Practica 6" -Quiet
+    if ($check) {
+        Write-Ok "Seguridad Apache ya estaba aplicada previamente."
+        return
+    }
 
     $bloque = @"
 

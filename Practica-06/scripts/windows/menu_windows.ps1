@@ -360,8 +360,9 @@ function Show-ChangePortMenu {
         "2" {
             $p = Get-PortFromUser -Servicio "Apache" -Default 8080
             if (Test-Path $script:APACHE_CONF) {
-                (Get-Content $script:APACHE_CONF) -replace '^Listen\s+.*', "Listen 0.0.0.0:$p" |
-                    Set-Content $script:APACHE_CONF
+                $c = Get-Content $script:APACHE_CONF | Where-Object { $_ -notmatch '^\s*Listen\s' -and $_ -notmatch '^\s*ServerName\s' }
+                $c = @("Listen 0.0.0.0:$p", "ServerName localhost:$p") + $c
+                $c | Set-Content $script:APACHE_CONF
                 # Actualizar index.html
                 Set-Content "$script:APACHE_HTDOCS\index.html" "<html><head><meta charset='UTF-8'><title>Apache - Practica 6</title><style>body{font-family:Segoe UI;background:#1a1a2e;color:#eee;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.card{background:#16213e;border-radius:12px;padding:40px 60px;text-align:center}h1{color:#4fc3f7}.badge{background:#e94560;color:#fff;border-radius:6px;padding:4px 14px;margin:4px;display:inline-block}</style></head><body><div class='card'><h1>Apache</h1><span class='badge'>Servidor: Apache</span><span class='badge'>Version: 2.4.55</span><span class='badge'>Puerto: $p</span></div></body></html>"
                 Set-FirewallRule -Puerto $p -Servicio "Apache"
