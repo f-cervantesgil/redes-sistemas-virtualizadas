@@ -403,12 +403,10 @@ function Install-IIS {
         New-Website -Name "Default Web Site" -Port $Puerto -PhysicalPath "C:\inetpub\wwwroot" -Force | Out-Null
         Write-Ok "Sitio 'Default Web Site' creado y configurado en puerto $Puerto."
     } else {
-        if ($Puerto -ne 80) {
-            Remove-WebBinding -Name "Default Web Site" -Port 80 -Protocol http -ErrorAction SilentlyContinue
-            Write-Ok "Binding default (80) removido."
-        }
-        Remove-WebBinding -Name "Default Web Site" -Port $Puerto -Protocol http -ErrorAction SilentlyContinue
-        New-WebBinding    -Name "Default Web Site" -Protocol http -Port $Puerto -IPAddress "*"
+        # Limpiar ABSOLUTAMENTE TODOS los bindings http viejos antes de poner el nuevo
+        Get-WebBinding -Name "Default Web Site" -Protocol http -ErrorAction SilentlyContinue | Remove-WebBinding -ErrorAction SilentlyContinue
+        # Crear binding en el formato correcto *:PUERTO:
+        New-WebBinding -Name "Default Web Site" -Protocol http -Port $Puerto
         Write-Ok "Binding IIS en puerto $Puerto configurado."
     }
 
@@ -483,8 +481,11 @@ function Set-IISSecurity {
     iisreset /restart | Out-Null
     Start-Sleep -Seconds 3
     Import-Module WebAdministration -ErrorAction SilentlyContinue
-    Start-WebAppPool -Name "DefaultAppPool" -ErrorAction SilentlyContinue
-    Start-Website -Name $SiteName -ErrorAction SilentlyContinue
+    $site = Get-Website -Name $SiteName -ErrorAction SilentlyContinue
+    if ($site) {
+        if ($site.applicationPool) { Start-WebAppPool -Name $site.applicationPool -ErrorAction SilentlyContinue }
+        Start-Website -Name $SiteName -ErrorAction SilentlyContinue
+    }
     Write-Ok "IIS reiniciado. Sitio activo."
 }
 
