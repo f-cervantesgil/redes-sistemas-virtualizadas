@@ -408,7 +408,7 @@ function Install-IIS {
             Write-Ok "Binding default (80) removido."
         }
         Remove-WebBinding -Name "Default Web Site" -Port $Puerto -Protocol http -ErrorAction SilentlyContinue
-        New-WebBinding    -Name "Default Web Site" -Protocol http -Port $Puerto
+        New-WebBinding    -Name "Default Web Site" -Protocol http -Port $Puerto -IPAddress "*"
         Write-Ok "Binding IIS en puerto $Puerto configurado."
     }
 
@@ -479,10 +479,11 @@ function Set-IISSecurity {
         Write-Ok "Regla de firewall creada: TCP $puerto abierto para IIS (todos los perfiles)."
     }
 
-    # Forzar arranque del sitio
+    # Forzar arranque del sitio y del pool
     iisreset /restart | Out-Null
     Start-Sleep -Seconds 3
     Import-Module WebAdministration -ErrorAction SilentlyContinue
+    Start-WebAppPool -Name "DefaultAppPool" -ErrorAction SilentlyContinue
     Start-Website -Name $SiteName -ErrorAction SilentlyContinue
     Write-Ok "IIS reiniciado. Sitio activo."
 }
