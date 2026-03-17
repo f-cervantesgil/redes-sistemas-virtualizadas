@@ -354,8 +354,8 @@ function Show-ChangePortMenu {
             Restart-Service W3SVC -ErrorAction SilentlyContinue
             $site = Get-Website -Name "Default Web Site" -ErrorAction SilentlyContinue
             if ($site) {
-                if ($site.applicationPool) { Start-WebAppPool -Name $site.applicationPool -ErrorAction SilentlyContinue }
-                Start-Website -Name "Default Web Site" -ErrorAction SilentlyContinue
+                if ($site.applicationPool) { Start-WebAppPool -Name $site.applicationPool }
+                Start-Website -Name "Default Web Site"
             }
             Write-Ok "Puerto IIS cambiado a $p. Esperando a que el servicio responda..."
             Start-Sleep -Seconds 3

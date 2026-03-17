@@ -483,8 +483,8 @@ function Set-IISSecurity {
     Import-Module WebAdministration -ErrorAction SilentlyContinue
     $site = Get-Website -Name $SiteName -ErrorAction SilentlyContinue
     if ($site) {
-        if ($site.applicationPool) { Start-WebAppPool -Name $site.applicationPool -ErrorAction SilentlyContinue }
-        Start-Website -Name $SiteName -ErrorAction SilentlyContinue
+        if ($site.applicationPool) { Start-WebAppPool -Name $site.applicationPool }
+        Start-Website -Name $SiteName
     }
     Write-Ok "IIS reiniciado. Sitio activo."
 }
