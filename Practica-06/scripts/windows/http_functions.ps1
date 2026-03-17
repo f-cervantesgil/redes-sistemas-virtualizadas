@@ -477,8 +477,20 @@ function Set-IISSecurity {
         Write-Ok "Regla de firewall creada: TCP $puerto abierto para IIS (todos los perfiles)."
     }
 
-    # Forzar arranque del sitio y del pool sin romper los objetos COM (NO USAR iisreset)
-    Restart-Service W3SVC -ErrorAction SilentlyContinue
+    # --- FUERZA BRUTA PARA EL ESCUCHA (LISTENER) ---
+    Write-Info "Limpiando restricciones de red en HTTP.SYS (Kernel)..."
+    # Quitar cualquier IP restringida que impida abrir el puerto
+    netsh http delete iplisten ipaddress=0.0.0.0 2>$null | Out-Null
+    netsh http add iplisten ipaddress=0.0.0.0 2>$null | Out-Null
+    
+    # Detener servicios en cascada para una limpieza profunda
+    Stop-Service W3SVC -Force -ErrorAction SilentlyContinue
+    Stop-Service WAS -Force -ErrorAction SilentlyContinue 
+    Start-Sleep -Seconds 2
+    
+    # Iniciar servicios de nuevo
+    Start-Service WAS -ErrorAction SilentlyContinue
+    Start-Service W3SVC -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 3
     Import-Module WebAdministration -ErrorAction SilentlyContinue
     $site = Get-Website -Name $SiteName -ErrorAction SilentlyContinue

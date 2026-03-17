@@ -156,15 +156,37 @@ function Install-NginxManual {
     $destDir = "C:\nginx"
 
     if (-not (Test-Path "$destDir\nginx.exe")) {
-        Write-Info "Descargando Nginx 1.26.3..."
-        Invoke-WebRequest -Uri $url -OutFile $destZip
-        Expand-Archive -Path $destZip -DestinationPath "C:\" -Force
-        if (Test-Path "C:\nginx-1.26.3") {
-            Rename-Item "C:\nginx-1.26.3" $destDir -ErrorAction SilentlyContinue
+        Write-Info "Intentando descargar Nginx 1.26.3..."
+        try {
+            # Intentar descarga desde el sitio oficial
+            Invoke-WebRequest -Uri $url -OutFile $destZip -ErrorAction Stop
+        } catch {
+            Write-Warn "Fallo descarga oficial. Intentando mirror secundario..."
+            try {
+                # Fallback: Mirror (ejemplo de GitHub o similar si estuviera disponible, o simplemente reportar)
+                Invoke-WebRequest -Uri "https://nginx.org/download/nginx-1.26.3.zip" -OutFile $destZip -ErrorAction Stop
+            } catch {
+                Write-Err "No hay conexion a internet para descargar Nginx."
+                Write-Host "Por favor, descarga 'nginx-1.26.3.zip' manualmente y ponlo en '$destZip'." -ForegroundColor Yellow
+                return
+            }
+        }
+        
+        if (Test-Path $destZip) {
+            Write-Ok "Archivo descargado. Extrayendo..."
+            if (-not (Test-Path "C:\")) { New-Item -ItemType Directory -Path "C:\" -Force | Out-Null }
+            Expand-Archive -Path $destZip -DestinationPath "C:\" -Force
+            if (Test-Path "C:\nginx-1.26.3") {
+                if (Test-Path $destDir) { Remove-Item $destDir -Recurse -Force -ErrorAction SilentlyContinue }
+                Rename-Item "C:\nginx-1.26.3" $destDir -ErrorAction SilentlyContinue
+            }
         }
     } else {
         Write-Info "Nginx ya descargado en $destDir"
     }
+
+    # Asegurar que el directorio de conf existe antes de llamar a Set-NginxConfig
+    if (-not (Test-Path "$destDir\conf")) { New-Item -ItemType Directory -Path "$destDir\conf" -Force | Out-Null }
 
     Set-NginxConfig -Puerto $puerto
     Set-WebRootPermissions -Webroot $script:NGINX_HTML -ServiceUser "NETWORK SERVICE"
@@ -211,9 +233,13 @@ http {
 }
 "@
     # Guardar SIN BOM para evitar error "unknown directive"
-    $encoding = New-Object System.Text.UTF8Encoding $false
-    [System.IO.File]::WriteAllText($script:NGINX_CONF, $contenido, $encoding)
-    Write-Ok "nginx.conf generado sin BOM en puerto $Puerto."
+    $e = New-Object System.Text.UTF8Encoding($false)
+    try {
+        [System.IO.File]::WriteAllText($script:NGINX_CONF, $contenido, $e)
+        Write-Ok "nginx.conf generado sin BOM en puerto $Puerto."
+    } catch {
+        Write-Err "No se pudo escribir nginx.conf: $_"
+    }
 }
 
 # ------------------------------------------------------------------------------
