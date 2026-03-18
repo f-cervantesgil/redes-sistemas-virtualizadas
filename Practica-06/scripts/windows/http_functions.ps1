@@ -658,7 +658,7 @@ http {
         add_header X-Content-Type-Options "nosniff"       always;
         add_header X-XSS-Protection       "1; mode=block" always;
 
-        if ($request_method !~ "^(GET|POST|HEAD|OPTIONS)$" ) {
+        if (`$request_method !~ "^(GET|POST|HEAD|OPTIONS)$" ) {
             return 405;
         }
 
