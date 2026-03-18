@@ -365,41 +365,64 @@ function Show-ChangePortMenu {
     $sel = Read-Host "  Servicio [0-3]"
     switch ($sel) {
         "1" {
+            $antiguo = Get-ServicePort -Servicio "W3SVC"
             $p = Get-PortFromUser -Servicio "IIS" -Default 80
+            
             Import-Module WebAdministration -ErrorAction SilentlyContinue
-            Get-WebBinding -Name "Default Web Site" -Protocol http |
-                Remove-WebBinding -ErrorAction SilentlyContinue
+            # Eliminar TODOS los bindings http de este sitio para limpiar realmente
+            Get-WebBinding -Name "Default Web Site" -Protocol http | Remove-WebBinding -ErrorAction SilentlyContinue
+            
             New-WebBinding -Name "Default Web Site" -Protocol http -Port $p -IPAddress "*"
+            
             # Actualizar index.html
-            Set-Content "$script:IIS_WEBROOT\index.html" "<html><head><meta charset='UTF-8'><title>IIS - Practica 6</title><style>body{font-family:Segoe UI;background:#1a1a2e;color:#eee;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.card{background:#16213e;border-radius:12px;padding:40px 60px;text-align:center}h1{color:#4fc3f7}.badge{background:#e94560;color:#fff;border-radius:6px;padding:4px 14px;margin:4px;display:inline-block}</style></head><body><div class='card'><h1>IIS</h1><span class='badge'>Servidor: IIS</span><span class='badge'>Version: 10.0</span><span class='badge'>Puerto: $p</span></div></body></html>"
-            Set-FirewallRule -Puerto $p -Servicio "IIS"
-            Restart-Service W3SVC -ErrorAction SilentlyContinue
-            Write-Ok "Puerto IIS cambiado a $p."
+            $iisVer = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\InetStp" -ErrorAction SilentlyContinue).VersionString
+            if (-not $iisVer) { $iisVer = "10.0" }
+            New-IndexPage -Servicio "IIS" -Version $iisVer -Puerto $p -Webroot $script:IIS_WEBROOT
+            
+            $pAnt = if ($antiguo -match '^\d+$') { [int]$antiguo } else { 0 }
+            Set-FirewallRule -Puerto $p -PuertoAnterior $pAnt -Servicio "IIS"
+            Restart-Service W3SVC -Force -ErrorAction SilentlyContinue
+            Write-Ok "Puerto IIS cambiado de $antiguo a $p."
             curl.exe -I "http://localhost:$p"
         }
         "2" {
+            $antiguo = Get-ServicePort -Servicio $script:APACHE_SVC
             $p = Get-PortFromUser -Servicio "Apache" -Default 8080
+            
             if (Test-Path $script:APACHE_CONF) {
-                (Get-Content $script:APACHE_CONF) -replace '^Listen \d+', "Listen $p" |
-                    Set-Content $script:APACHE_CONF
-                # Actualizar index.html
-                Set-Content "$script:APACHE_HTDOCS\index.html" "<html><head><meta charset='UTF-8'><title>Apache - Practica 6</title><style>body{font-family:Segoe UI;background:#1a1a2e;color:#eee;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.card{background:#16213e;border-radius:12px;padding:40px 60px;text-align:center}h1{color:#4fc3f7}.badge{background:#e94560;color:#fff;border-radius:6px;padding:4px 14px;margin:4px;display:inline-block}</style></head><body><div class='card'><h1>Apache</h1><span class='badge'>Servidor: Apache</span><span class='badge'>Version: 2.4.55</span><span class='badge'>Puerto: $p</span></div></body></html>"
-                Set-FirewallRule -Puerto $p -Servicio "Apache"
-                Restart-Service $script:APACHE_SVC -ErrorAction SilentlyContinue
-                Start-Sleep -Seconds 2
-                Write-Ok "Puerto Apache cambiado a $p."
+                # Detener procesos viejos para facilitar cambios
+                Stop-Service $script:APACHE_SVC -Force -ErrorAction SilentlyContinue
+                Get-Process httpd -ErrorAction SilentlyContinue | Stop-Process -Force
+                
+                (Get-Content $script:APACHE_CONF) -replace "^Listen \d+", "Listen $p" | Set-Content $script:APACHE_CONF
+                
+                $ver = Get-InstalledVersion -Servicio "apache-httpd"
+                New-IndexPage -Servicio "Apache" -Version $ver -Puerto $p -Webroot $script:APACHE_HTDOCS
+                
+                $pAnt = if ($antiguo -match '^\d+$') { [int]$antiguo } else { 0 }
+                Set-FirewallRule -Puerto $p -PuertoAnterior $pAnt -Servicio "Apache"
+                Start-Service $script:APACHE_SVC -ErrorAction SilentlyContinue
+                Write-Ok "Puerto Apache cambiado de $antiguo a $p."
                 curl.exe -I "http://localhost:$p"
-            } else { Write-Err "httpd.conf no encontrado en $script:APACHE_CONF" }
+            } else { Write-Err "httpd.conf no encontrado." }
         }
         "3" {
+            $antiguo = Get-ServicePort -Servicio $script:NGINX_SVC
             $p = Get-PortFromUser -Servicio "Nginx" -Default 8081
+            
+            # Detener procesos viejos
+            Stop-Service $script:NGINX_SVC -Force -ErrorAction SilentlyContinue
+            Get-Process nginx -ErrorAction SilentlyContinue | Stop-Process -Force
+            
             Set-NginxConfig -Puerto $p
-            # Actualizar index.html
-            Set-Content "$script:NGINX_HTML\index.html" "<html><head><meta charset='UTF-8'><title>Nginx - Practica 6</title><style>body{font-family:Segoe UI;background:#1a1a2e;color:#eee;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.card{background:#16213e;border-radius:12px;padding:40px 60px;text-align:center}h1{color:#4fc3f7}.badge{background:#e94560;color:#fff;border-radius:6px;padding:4px 14px;margin:4px;display:inline-block}</style></head><body><div class='card'><h1>Nginx</h1><span class='badge'>Servidor: Nginx</span><span class='badge'>Version: 1.26.3</span><span class='badge'>Puerto: $p</span></div></body></html>"
-            Set-FirewallRule -Puerto $p -Servicio "Nginx"
-            nssm restart $script:NGINX_SVC 2>$null | Out-Null
-            Start-Sleep -Seconds 2
-            Write-Ok "Puerto Nginx cambiado a $p."
+            
+            $ver = Get-InstalledVersion -Servicio "nginx"
+            New-IndexPage -Servicio "Nginx" -Version $ver -Puerto $p -Webroot $script:NGINX_HTML
+            
+            $pAnt = if ($antiguo -match '^\d+$') { [int]$antiguo } else { 0 }
+            Set-FirewallRule -Puerto $p -PuertoAnterior $pAnt -Servicio "Nginx"
+            Start-Service $script:NGINX_SVC -ErrorAction SilentlyContinue
+            Write-Ok "Puerto Nginx cambiado de $antiguo a $p."
             curl.exe -I "http://localhost:$p"
         }
         "0" { return }
