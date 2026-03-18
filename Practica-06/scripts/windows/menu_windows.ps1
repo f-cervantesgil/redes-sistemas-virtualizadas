@@ -13,7 +13,7 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $script:APACHE_CONF    = "$env:APPDATA\Apache24\conf\httpd.conf"
 $script:APACHE_HTDOCS  = "$env:APPDATA\Apache24\htdocs"
 $script:APACHE_BIN     = "$env:APPDATA\Apache24\bin\httpd.exe"
-$script:APACHE_SVC     = "Apache2.4"
+$script:APACHE_SVC     = "Apache24"
 $script:NGINX_CONF     = "C:\nginx\conf\nginx.conf"
 $script:NGINX_HTML     = "C:\nginx\html"
 $script:NGINX_SVC      = "Nginx"
@@ -279,7 +279,7 @@ function Show-PortsStatus {
         Select-Object LocalPort, OwningProcess |
         ForEach-Object {
             $proc = Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue
-            [PSCustomObject]@{ Puerto=$.LocalPort; PID=$.OwningProcess; Proceso=$proc.Name }
+            [PSCustomObject]@{ Puerto=$_.LocalPort; PID=$_.OwningProcess; Proceso=$proc.Name }
         } |
         Where-Object { $_.Puerto -in @(80,443,999,8080,8081,8082,8083,8084,8085,8086,8087,8088,8888,9090,$apachePuerto,$nginxPuerto,$iisPuerto) } |
         Sort-Object Puerto -Unique |
@@ -458,7 +458,7 @@ function Show-FreePortsMenu {
                 Select-Object LocalPort, OwningProcess |
                 ForEach-Object {
                     $proc = Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue
-                    [PSCustomObject]@{ Puerto=$.LocalPort; PID=$.OwningProcess; Proceso=$proc.Name }
+                    [PSCustomObject]@{ Puerto=$_.LocalPort; PID=$_.OwningProcess; Proceso=$proc.Name }
                 } |
                 Where-Object { $_.Puerto -lt 10000 } |
                 Sort-Object Puerto -Unique |
