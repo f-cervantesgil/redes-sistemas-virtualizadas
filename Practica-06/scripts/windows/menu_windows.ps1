@@ -3,39 +3,105 @@
 # Practica 6 - Windows Server 2022 - Aprovisionamiento HTTP
 # ============================================================================
 
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$FunctionsFile = Join-Path $ScriptDir 'http_functions.ps1'
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
 
-if (-not (Test-Path $FunctionsFile)) {
-    Write-Host "ERROR: No se encontro el archivo de funciones: $FunctionsFile" -ForegroundColor Red
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Paeth
+$FunctionsFile = Join-Path $ScriptDir 'http_functions.ps1'
+$script:LibraryLoaded = $false
+
+function Import-FunctionsLibrary {
+    param([string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        throw "No se encontro el archivo de funciones: $Path"
+    }
+
+    if (Get-Command Unblock-File -ErrorAction SilentlyContinue) {
+        try { Unblock-File -LiteralPath $Path -ErrorAction SilentlyContinue } catch {}
+    }
+
+    try {
+        $raw = Get-Content -LiteralPath $Path -Raw -Encoding UTF8
+        if ([string]::IsNullOrWhiteSpace($raw)) {
+            throw 'El archivo de funciones esta vacio.'
+        }
+
+        . ([scriptblock]::Create($raw))
+    } catch {
+        throw "No se pudo cargar la biblioteca de funciones '$Path'. Detalle: $($_.Exception.Message)"
+    }
+
+    $required = @(
+        'Assert-Admin',
+        'Write-Info',
+        'Write-Ok',
+        'Write-Warn',
+        'Write-Section',
+        'Get-ServiceStateSummary',
+        'Get-ServiceConfiguredPort',
+        'Get-ListeningTable',
+        'Get-PortFromUser',
+        'Install-IIS',
+        'Install-ApacheWindows',
+        'Install-NginxWindows',
+        'Invoke-ServiceAction',
+        'Show-ServiceLogs',
+        'Set-IISPort',
+        'Configure-Apache',
+        'Set-NginxConfig',
+        'Restart-NginxManaged',
+        'Test-HttpHeaders',
+        'Stop-ListeningServiceByPort',
+        'Select-Version'
+    )
+
+    $missing = @($required | Where-Object { -not (Get-Command $_ -ErrorAction SilentlyContinue) })
+    if ($missing.Count -gt 0) {
+        throw "La biblioteca se cargo de forma incompleta. Faltan funciones: $($missing -join ', ')"
+    }
+
+    $script:LibraryLoaded = $true
+}
+
+function Write-ErrLocal {
+    param([string]$Text)
+    Write-Host "[ERR]  $Text" -ForegroundColor Red
+}
+
+try {
+    Import-FunctionsLibrary -Path $FunctionsFile
+    Assert-Admin
+} catch {
+    Write-ErrLocal $_.Exception.Message
+    Write-Host ''
+    Read-Host 'Presiona ENTER para salir' | Out-Null
     exit 1
 }
-
-. $FunctionsFile
-
-if (-not (Get-Command Write-Err -ErrorAction SilentlyContinue)) {
-    function Write-Err {
-        param([string]$Text)
-        Write-Host "[ERR]  $Text" -ForegroundColor Red
-    }
-}
-
-Assert-Admin
 
 function Show-ServiceStatus {
     Write-Host '  Estado actual de servicios:' -ForegroundColor White
 
+    if (-not $script:LibraryLoaded) {
+        Write-Host '    [!] Biblioteca de funciones no cargada.' -ForegroundColor Yellow
+        return
+    }
+
     foreach ($svc in @('IIS','Apache','Nginx')) {
-        $st = Get-ServiceStateSummary -Servicio $svc
-        if ($st.Running) {
-            Write-Host ("    [+] {0,-7} activo   puerto real: {1}" -f $svc, $st.RealPort) -ForegroundColor Green
-        } elseif ($st.ConfiguredPort) {
-            Write-Host ("    [-] {0,-7} inactivo/configurado puerto: {1}" -f $svc, $st.ConfiguredPort) -ForegroundColor Yellow
-            if ($st.Detail) {
-                Write-Host ("        {0}" -f $st.Detail) -ForegroundColor DarkYellow
+        try {
+            $st = Get-ServiceStateSummary -Servicio $svc
+            if ($st.Running) {
+                Write-Host ("    [+] {0,-7} activo   puerto real: {1}" -f $svc, $st.RealPort) -ForegroundColor Green
+            } elseif ($st.ConfiguredPort) {
+                Write-Host ("    [-] {0,-7} inactivo/configurado puerto: {1}" -f $svc, $st.ConfiguredPort) -ForegroundColor Yellow
+                if ($st.Detail) {
+                    Write-Host ("        {0}" -f $st.Detail) -ForegroundColor DarkYellow
+                }
+            } else {
+                Write-Host ("    [-] {0,-7} no instalado / sin config" -f $svc) -ForegroundColor Red
             }
-        } else {
-            Write-Host ("    [-] {0,-7} no instalado / sin config" -f $svc) -ForegroundColor Red
+        } catch {
+            Write-Host ("    [!] {0,-7} error al consultar estado: {1}" -f $svc, $_.Exception.Message) -ForegroundColor Yellow
         }
     }
 }
