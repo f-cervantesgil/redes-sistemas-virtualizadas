@@ -377,7 +377,8 @@ function Restart-IISStack {
 
     Import-Module WebAdministration -ErrorAction SilentlyContinue
 
-    try { Start-Service HTTP  -ErrorAction SilentlyContinue } catch {}
+    try { Set-Service WAS   -StartupType Automatic -ErrorAction SilentlyContinue } catch {}
+    try { Set-Service W3SVC -StartupType Automatic -ErrorAction SilentlyContinue } catch {}
     try { Start-Service WAS   -ErrorAction SilentlyContinue } catch {}
     try { Start-Service W3SVC -ErrorAction SilentlyContinue } catch {}
 
@@ -387,12 +388,10 @@ function Restart-IISStack {
         }
     } catch {}
 
-    try { Stop-Website  -Name $SiteName -ErrorAction SilentlyContinue } catch {}
-    Start-Sleep -Seconds 1
-    try { Start-Website -Name $SiteName -ErrorAction SilentlyContinue } catch {}
-
     try {
-        & "$env:SystemRoot\System32\iisreset.exe" /restart | Out-Null
+        if (Test-Path "IIS:\Sites\$SiteName") {
+            Start-Website -Name $SiteName -ErrorAction SilentlyContinue
+        }
     } catch {}
 
     Start-Sleep -Seconds 2
@@ -406,35 +405,63 @@ function Set-IISPort {
 
     Import-Module WebAdministration -ErrorAction Stop
 
+    if (-not (Test-Path $script:IIS_WEBROOT)) {
+        New-Item -ItemType Directory -Path $script:IIS_WEBROOT -Force | Out-Null
+    }
+
     if (-not (Test-Path "IIS:\Sites\$SiteName")) {
         New-Website -Name $SiteName -PhysicalPath $script:IIS_WEBROOT -Port $Puerto -IPAddress "*" -Force | Out-Null
     } else {
-        Get-WebBinding -Name $SiteName -Protocol "http" -ErrorAction SilentlyContinue |
-            Remove-WebBinding -ErrorAction SilentlyContinue
-        New-WebBinding -Name $SiteName -Protocol "http" -IPAddress "*" -Port $Puerto | Out-Null
+        Set-ItemProperty "IIS:\Sites\$SiteName" -Name physicalPath -Value $script:IIS_WEBROOT
+        $bindings = Get-WebBinding -Name $SiteName -Protocol "http" -ErrorAction SilentlyContinue
+        foreach ($b in @($bindings)) {
+            Remove-WebBinding -Name $SiteName -Protocol "http" -Port (($b.bindingInformation -split ':')[1]) -IPAddress (($b.bindingInformation -split ':')[0]) -HostHeader (($b.bindingInformation -split ':')[2]) -ErrorAction SilentlyContinue
+        }
+        New-WebBinding -Name $SiteName -Protocol "http" -IPAddress "*" -Port $Puerto -HostHeader "" | Out-Null
     }
 
     Restart-IISStack -SiteName $SiteName
 
+    $state = ""
+    try { $state = (Get-Website -Name $SiteName).State } catch {}
+
     $escucha = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
         Where-Object { $_.LocalPort -eq $Puerto }
 
-    if (-not $escucha) {
-        Write-Warn "IIS aun no aparece escuchando en $Puerto. Se intentara un segundo arranque limpio."
-        try { Stop-Service W3SVC -Force -ErrorAction SilentlyContinue } catch {}
-        try { Stop-Service WAS   -Force -ErrorAction SilentlyContinue } catch {}
+    if ($state -ne "Started") {
+        try { Start-Website -Name $SiteName -ErrorAction SilentlyContinue } catch {}
         Start-Sleep -Seconds 2
-        Restart-IISStack -SiteName $SiteName
+        try { $state = (Get-Website -Name $SiteName).State } catch {}
+    }
+
+    if (-not $escucha) {
         $escucha = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
             Where-Object { $_.LocalPort -eq $Puerto }
     }
 
-    if ($escucha) {
+    if ($state -eq "Started" -and $escucha) {
         Write-Ok "IIS escuchando en puerto $Puerto."
         return $true
     }
 
-    Write-Warn "No se detecto listener activo en el puerto $Puerto. Revisa HTTP.sys / Event Viewer si continua el fallo."
+    Write-Warn "IIS no confirmo listener activo en $Puerto. Se aplicara un reinicio final del sitio."
+    try { Stop-Website -Name $SiteName -ErrorAction SilentlyContinue } catch {}
+    Start-Sleep -Seconds 1
+    try { Start-Website -Name $SiteName -ErrorAction SilentlyContinue } catch {}
+    try { Start-WebAppPool -Name "DefaultAppPool" -ErrorAction SilentlyContinue } catch {}
+    Start-Sleep -Seconds 2
+
+    $state = ""
+    try { $state = (Get-Website -Name $SiteName).State } catch {}
+    $escucha = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
+        Where-Object { $_.LocalPort -eq $Puerto }
+
+    if ($state -eq "Started" -and $escucha) {
+        Write-Ok "IIS escuchando en puerto $Puerto."
+        return $true
+    }
+
+    Write-Warn "No se detecto listener activo en el puerto $Puerto. Revisa eventos de IIS/WAS si continua el fallo."
     return $false
 }
 
@@ -540,72 +567,28 @@ function Set-IISSecurity {
 
     $ac = "$env:SystemRoot\system32\inetsrv\appcmd.exe"
 
-    # Ocultar X-Powered-By y Server
-    & $ac set config /section:httpProtocol /-"customHeaders.[name='X-Powered-By']"        /commit:apphost 2>$null | Out-Null
+    & $ac set config /section:httpProtocol /-"customHeaders.[name='X-Powered-By']" /commit:apphost 2>$null | Out-Null
     try {
         Set-WebConfigurationProperty -PSPath "IIS:\" -Filter "system.webServer/security/requestFiltering" -Name "removeServerHeader" -Value $true
         Write-Ok "Header Server ocultado (removeServerHeader = true)."
     } catch { Write-Warn "removeServerHeader: $_" }
 
-    # Headers de seguridad: BORRAR primero para evitar duplicados, luego agregar
     $headers = [ordered]@{
         "X-Frame-Options"        = "SAMEORIGIN"
         "X-Content-Type-Options" = "nosniff"
         "X-XSS-Protection"       = "1; mode=block"
     }
+
     foreach ($h in $headers.GetEnumerator()) {
-        # Borrar en todos los niveles posibles
         & $ac set config /section:httpProtocol /-"customHeaders.[name='$($h.Key)']" /commit:apphost 2>$null | Out-Null
-        & $ac set config "site '$SiteName'" /section:httpProtocol /-"customHeaders.[name='$($h.Key)']" /commit:webroot 2>$null | Out-Null
-        # Agregar limpio
         & $ac set config /section:httpProtocol /+"customHeaders.[name='$($h.Key)',value='$($h.Value)']" /commit:apphost 2>$null | Out-Null
         Write-Ok "$($h.Key): $($h.Value)"
     }
 
-    # Bloquear verbos peligrosos
     foreach ($m in @("TRACE", "TRACK", "DELETE")) {
         & $ac set config /section:requestFiltering /+"verbs.[verb='$m',allowed='false']" /commit:apphost 2>$null | Out-Null
     }
     Write-Ok "Metodos TRACE, TRACK, DELETE bloqueados en IIS."
-
-    # --- ABRIR FIREWALL CORRECTAMENTE PARA IIS ---
-    # NO deshabilitar el firewall completo; crear una regla especifica de entrada
-    $binding = Get-WebBinding -Name $SiteName -Protocol "http" -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($binding) {
-        $puerto = [int]($binding.bindingInformation -split ':')[1]
-        # Eliminar regla vieja si existe y crear una nueva limpia
-        Remove-NetFirewallRule -DisplayName "IIS-Puerto-$puerto" -ErrorAction SilentlyContinue
-        New-NetFirewallRule `
-            -DisplayName  "IIS-Puerto-$puerto" `
-            -Direction    Inbound `
-            -Protocol     TCP `
-            -LocalPort    $puerto `
-            -Action       Allow `
-            -Profile      Any `
-            -ErrorAction  Stop | Out-Null
-    }
-
-    # --- REESTABLECIMIENTO TOTAL DE RED (FUERZA BRUTA) ---
-    Write-Info "Reseteando enchufe de red IIS (HTTP.SYS)..."
-    # Forzar que el kernel escuche en todas las interfaces
-    netsh http delete iplisten ipaddress=0.0.0.0 2>$null | Out-Null
-    netsh http add iplisten ipaddress=0.0.0.0 2>$null | Out-Null
-    
-    # Matar procesos si estan bloqueando el reinicio
-    Stop-Service W3SVC -Force -ErrorAction SilentlyContinue
-    Stop-Service WAS -Force -ErrorAction SilentlyContinue
-    Get-Process w3wp -ErrorAction SilentlyContinue | Stop-Process -Force
-    Start-Sleep -Seconds 2
-    
-    Start-Service WAS -ErrorAction SilentlyContinue
-    Start-Service W3SVC -ErrorAction SilentlyContinue
-    
-    # Forzar inicio de AppPool y Website via AppCmd
-    $appcmd = "$env:SystemRoot\system32\inetsrv\appcmd.exe"
-    & $appcmd start apppool /apppool.name:"DefaultAppPool" 2>$null | Out-Null
-    & $appcmd start site "Default Web Site" 2>$null | Out-Null
-    
-    Write-Ok "IIS reiniciado y enchufe de red forzado."
 }
 
 # ------------------------------------------------------------------------------

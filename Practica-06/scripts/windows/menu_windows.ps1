@@ -5,7 +5,7 @@
 # ==============================================================================
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-. "$ScriptDir\http_functions.ps1"
+. "$ScriptDir\http_functions_corregido_v2.ps1"
 
 # ------------------------------------------------------------------------------
 # RUTAS REALES DE CADA SERVICIO (ajustadas a tu servidor)
