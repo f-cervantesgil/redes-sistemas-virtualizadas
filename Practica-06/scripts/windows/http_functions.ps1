@@ -667,8 +667,10 @@ http {
     }
 }
 "@
-    Set-Content -Path $confFile -Value $nginxConf -Encoding UTF8
-    Write-Ok "nginx.conf generado con puerto $Puerto."
+    # Guardar nginx.conf SIN BOM (importante para evitar error "unknown directive" en Windows)
+    $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllText($confFile, $nginxConf, $utf8NoBom)
+    Write-Ok "nginx.conf generado (sin BOM) con puerto $Puerto."
 
     Set-WebRootPermissions -Webroot $webroot -ServiceUser "NETWORK SERVICE"
 
@@ -686,22 +688,42 @@ function Register-NginxService {
     param([string]$NginxDir)
 
     if (-not (Get-Command nssm -ErrorAction SilentlyContinue)) {
-        Write-Info "Instalando NSSM para gestionar Nginx como servicio..."
+        Write-Info "Instalando NSSM para gestionar Nginx..."
         Install-Package -Paquete "nssm" -Version "latest"
         $env:PATH += ";$env:ChocolateyInstall\bin"
     }
 
-    $nginxExe = "$NginxDir\nginx.exe"
+    $serviceName = "Nginx"
+    $nginxExe    = "$NginxDir\nginx.exe"
+
     if (Get-Command nssm -ErrorAction SilentlyContinue) {
-        nssm stop    "Nginx" 2>$null | Out-Null
-        nssm remove  "Nginx" confirm 2>$null | Out-Null
-        nssm install "Nginx" $nginxExe 2>&1 | Out-Null
-        nssm set     "Nginx" AppDirectory $NginxDir 2>&1 | Out-Null
-        nssm set     "Nginx" Start SERVICE_AUTO_START 2>&1 | Out-Null
-        Start-Service "Nginx" -ErrorAction SilentlyContinue
-        Write-Ok "Nginx registrado como servicio Windows (NSSM) e iniciado."
+        Write-Info "Registrando servicio Nginx mediante NSSM..."
+        nssm stop    $serviceName 2>$null | Out-Null
+        nssm remove  $serviceName confirm 2>$null | Out-Null
+        
+        nssm install $serviceName $nginxExe 2>&1 | Out-Null
+        nssm set     $serviceName AppDirectory $NginxDir 2>&1 | Out-Null
+        nssm set     $serviceName Start SERVICE_AUTO_START 2>&1 | Out-Null
+        
+        Write-Info "Iniciando servicio Nginx..."
+        Start-Service $serviceName -ErrorAction SilentlyContinue
+        
+        # Verificar estado tras unos segundos
+        Start-Sleep -Seconds 2
+        $s = Get-Service $serviceName -ErrorAction SilentlyContinue
+        if ($s -and $s.Status -eq "Running") {
+            Write-Ok "Servicio Nginx registrado y ACTIVO con éxito."
+        } else {
+            Write-Err "Nginx no pudo iniciar correctamente. Revisa logs en $NginxDir\logs\error.log"
+            # Fallback: intentar ver el primer error del log
+            $log = "$NginxDir\logs\error.log"
+            if (Test-Path $log) {
+                Write-Host "Ultimas lineas del log de error:" -ForegroundColor White
+                Get-Content $log -Tail 5
+            }
+        }
     } else {
-        Write-Warn "NSSM no disponible. Iniciando Nginx directamente..."
+        Write-Warn "NSSM no disponible. Iniciando binario directamente..."
         Start-Process $nginxExe -WorkingDirectory $NginxDir -WindowStyle Hidden
         Write-Ok "Nginx iniciado en segundo plano."
     }
