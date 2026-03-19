@@ -80,7 +80,16 @@ generate_cert() {
 configure_ssl_apache() {
     echo "[*] Configurando SSL en Apache ($SERVICE_APACHE)..."
     generate_cert
-    eval $ENABLE_SSL_CMD
+    
+    # Asegurar que el directorio de configuración existe
+    sudo mkdir -p "$CONF_APACHE"
+    
+    # Intentar instalar mod_ssl basándonos en la distro
+    if [ "$OS" == "mageia" ]; then
+        sudo dnf install -y apache-mod_ssl 2>/dev/null
+    else
+        eval $ENABLE_SSL_CMD
+    fi
     
     # Crear VirtualHost 443
     if [ "$PKM" == "apt" ]; then
@@ -95,6 +104,7 @@ configure_ssl_apache() {
 <VirtualHost *:443>
     ServerName $DOMAIN
     DocumentRoot /var/www/html
+    [ ! -d "/var/www/html" ] && DocumentRoot /var/www/html
     SSLEngine on
     SSLCertificateFile $CERT_FILE
     SSLCertificateKeyFile $KEY_FILE
