@@ -223,20 +223,43 @@ while true; do
         3) run_service_flow "Tomcat" ;;
         4) 
             echo -e "\n${YELLOW}[INFO] Evaluando configuración de vsftpd...${NC}"
-            if ! systemctl status vsftpd &> /dev/null; then
+            # Asegurar instalación y recarga de systemd (Crucial en Mageia)
+            if ! rpm -q vsftpd &> /dev/null; then
                 echo -e "${CYAN}[*] Instalando vsftpd...${NC}"
                 $PKG_INSTALL vsftpd &> /dev/null
+                sudo systemctl daemon-reload
             fi
+
             generate_cert
+            
+            # Ruta de configuración específica de Mageia
             CONFIG="/etc/vsftpd/vsftpd.conf"
             [ ! -f "$CONFIG" ] && CONFIG="/etc/vsftpd.conf"
-            sudo sed -i 's/ssl_enable=NO/ssl_enable=YES/' $CONFIG
-            echo "rsa_cert_file=$CERT_FILE" | sudo tee -a $CONFIG > /dev/null
-            echo "rsa_private_key_file=$KEY_FILE" | sudo tee -a $CONFIG > /dev/null
-            echo "allow_anon_ssl=YES" | sudo tee -a $CONFIG > /dev/null
-            echo "force_local_data_ssl=YES" | sudo tee -a $CONFIG > /dev/null
-            sudo systemctl restart vsftpd
-            echo -e "${GREEN}[OK] FTPS activado correctamente.${NC}"
+            
+            if [ -f "$CONFIG" ]; then
+                sudo sed -i 's/ssl_enable=NO/ssl_enable=YES/' $CONFIG
+                grep -q "ssl_enable=YES" $CONFIG || echo "ssl_enable=YES" | sudo tee -a $CONFIG > /dev/null
+                echo "rsa_cert_file=$CERT_FILE" | sudo tee -a $CONFIG > /dev/null
+                echo "rsa_private_key_file=$KEY_FILE" | sudo tee -a $CONFIG > /dev/null
+                echo "allow_anon_ssl=YES" | sudo tee -a $CONFIG > /dev/null
+                echo "force_local_data_ssl=YES" | sudo tee -a $CONFIG > /dev/null
+                
+                # Detectar nombre correcto del servicio (Mageia puede usar .service o .socket)
+                SVC_FTP="vsftpd.service"
+                if ! systemctl list-unit-files | grep -q "vsftpd.service"; then
+                    if systemctl list-unit-files | grep -q "vsftpd.socket"; then
+                        SVC_FTP="vsftpd.socket"
+                    fi
+                fi
+                
+                echo -e "${CYAN}[*] Reiniciando $SVC_FTP...${NC}"
+                sudo systemctl daemon-reload
+                sudo systemctl enable $SVC_FTP &> /dev/null
+                sudo systemctl restart $SVC_FTP
+                echo -e "${GREEN}[OK] FTPS activado correctamente.${NC}"
+            else
+                echo -e "${RED}[!] Error: No se encontró el archivo de configuración vsftpd.conf${NC}"
+            fi
             ;;
         5) 
             echo -e "\n--- Reporte de Estado ---"
