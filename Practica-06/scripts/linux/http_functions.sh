@@ -111,9 +111,35 @@ create_custom_index() {
     mkdir -p "$path"
     
     cat <<EOF > "$path/index.html"
-Servidor: $service
-Versión: $version
-Puerto: $port
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>$service - Practica 6</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background: #1a1a2e; color: #eee; 
+               display: flex; justify-content: center; align-items: center; 
+               height: 100vh; margin: 0; }
+        .card { background: #16213e; border-radius: 12px; padding: 40px 60px; 
+                box-shadow: 0 8px 32px rgba(0,0,0,.5); text-align: center; }
+        h1 { color: #4fc3f7; font-size: 2.2em; margin-bottom: .3em; }
+        .badge { display: inline-block; background: #e94560; color: #fff; 
+                 border-radius: 6px; padding: 4px 14px; font-size: .9em; margin: 6px 4px; }
+        .info { color: #a8b2d8; margin-top: 1em; font-size: .95em; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>$service</h1>
+        <div>
+            <span class="badge">Servidor: Linux</span>
+            <span class="badge">Versión: $version</span>
+            <span class="badge">Puerto: $port</span>
+        </div>
+        <p class="info">Aprovisionado automáticamente - Práctica 6 - Mageia Linux</p>
+    </div>
+</body>
+</html>
 EOF
     # Ajustar permisos dinámicamente según el servicio
     if [[ "$service" == *"Nginx"* ]]; then
