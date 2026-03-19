@@ -115,8 +115,15 @@ Servidor: $service
 Versión: $version
 Puerto: $port
 EOF
-    # Ajustar permisos para Mageia (apache) y fallback para otros (www-data)
-    chown -R apache:apache "$path" 2>/dev/null || chown -R www-data:www-data "$path" 2>/dev/null
+    # Ajustar permisos dinámicamente según el servicio
+    if [[ "$service" == *"Nginx"* ]]; then
+        chown -R nginx:nginx "$path" 2>/dev/null
+    elif [[ "$service" == *"Tomcat"* ]]; then 
+        chown -R tomcat:tomcat "$path" 2>/dev/null
+    else
+        chown -R apache:apache "$path" 2>/dev/null || chown -R www-data:www-data "$path" 2>/dev/null
+    fi
+    chmod -R 755 "$path" 2>/dev/null
 }
 
 # Instalación de Apache (Mageia: apache)
@@ -220,8 +227,10 @@ install_tomcat() {
     # 4. Configurar puerto en server.xml
     sed -i "s/Connector port=\"8080\"/Connector port=\"$port\"/" /opt/tomcat/conf/server.xml
     
-    # 5. Crear index personalizado
+    # 5. Crear index personalizado y asegurar permisos
     create_custom_index "Tomcat" "$version" "$port" "/opt/tomcat/webapps/ROOT"
+    chown -R tomcat:tomcat /opt/tomcat/webapps/ROOT
+    chmod -R 755 /opt/tomcat/webapps/ROOT
     
     # 6. Crear servicio systemd
     cat <<EOF > /etc/systemd/system/tomcat.service
