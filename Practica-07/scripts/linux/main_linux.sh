@@ -179,12 +179,12 @@ configure_ftps_vsftpd() {
 ftp_browser() {
     local service=$1
     local remote_path="$FTP_SERVER/http/Linux/$service/"
-    echo "[*] Conectando a FTP: $remote_path"
-    files=$(curl -s -l "$remote_path")
+    echo "[*] Conectando a FTP: $remote_path" >&2
+    files=$(curl -s -kl "$remote_path")
     if [ -z "$files" ]; then return 1; fi
     options=($files)
-    for i in "${!options[@]}"; do echo "[$i] ${options[$i]}"; done
-    read -p "Seleccion: " choice
+    for i in "${!options[@]}"; do echo "[$i] ${options[$i]}" >&2; done
+    read -p "Seleccion: " choice >&2
     [ "$choice" -ge 0 ] && [ "$choice" -lt "${#options[@]}" ] && echo "${options[$choice]}"
 }
 
@@ -193,10 +193,12 @@ download_and_verify() {
     local filename=$2
     local remote_url="$FTP_SERVER/http/Linux/$service/$filename"
     local local_file="$LOCAL_REPO/$filename"
-    curl -s -o "$local_file" "$remote_url"
-    curl -s -o "$local_file.sha256" "$remote_url.sha256"
+    echo "[*] Descargando $filename..." >&2
+    curl -s -ko "$local_file" "$remote_url"
+    curl -s -ko "$local_file.sha256" "$remote_url.sha256"
     if [ -f "$local_file.sha256" ]; then
-        cd $LOCAL_REPO && sha256sum -c "$filename.sha256" && echo "$local_file"
+        echo "[*] Verificando integridad..." >&2
+        cd $LOCAL_REPO && sha256sum -c "$filename.sha256" >&2 && echo "$local_file"
     else
         echo "$local_file"
     fi
