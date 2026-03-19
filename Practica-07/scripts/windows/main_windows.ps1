@@ -214,7 +214,8 @@ Function Show-Menu {
     Write-Host " [4] Instalar Tomcat   (WEB o FTP + SSL opcional)"
     Write-Host " [5] Configurar FTPS   (SSL en IIS-FTP)"
     Write-Host " [6] Ver estado de servicios"
-    Write-Host " [7] Salir"
+    Write-Host " [7] Detener todos los servicios (Emergencia)"
+    Write-Host " [8] Salir"
     Write-Host ""
 }
 
@@ -260,7 +261,12 @@ while ($true) {
             }
             $report | Format-Table -AutoSize
         }
-        "7" { exit }
+        "7" {
+            Write-Host "[!] DETENIENDO TODOS LOS SERVICIOS..." -ForegroundColor Red
+            Stop-Service -Name W3SVC, ftpsvc, Apache*, Nginx*, Tomcat* -Force -ErrorAction SilentlyContinue 
+            Write-Host "[+] Limpieza completada. Todos los servicios detenidos." -ForegroundColor Yellow
+        }
+        "8" { exit }
         Default { Write-Host "Opcion no valida." -ForegroundColor Red; Start-Sleep -Seconds 1 }
     }
     Write-Host ""
