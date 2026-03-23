@@ -781,21 +781,30 @@ HTMLEOF
             
             local TOMCAT_XML="/etc/tomcat/server.xml"
             if [ -f "$TOMCAT_XML" ]; then
-                # Reemplazo mas robusto para cualquier variacion de espacios o comillas en el puerto 8080
+                fn_info "Auditando $TOMCAT_XML para forzar puerto ${PUERTO}..."
+                
+                # REGLA DE ORO: Descomentar el bloque si esta comentado y cambiar el puerto 8080
+                # Buscamos <Connector port="8080" y quitamos comentarios alrededor de ese bloque si existen.
+                # Luego cambiamos 8080 por el nuevo puerto.
+                sed -i 's/<!--.*port=["'\'']8080["'\'']/ <Connector port="8080"/g' "$TOMCAT_XML"
+                sed -i 's/port=["'\'']8080["'\''].*-->/port="8080" \/>/g' "$TOMCAT_XML"
+                
+                # Ahora cambiamos el puerto 8080 real a el nuevo puerto
                 sed -i "s/port=['\"]8080['\"]/port=\"${PUERTO}\"/g" "$TOMCAT_XML"
                 
-                # Verificar si el cambio se aplico realmente en el archivo
+                # Dar permisos para que Tomcat pueda leer el archivo al iniciar
+                chown -R tomcat:tomcat /etc/tomcat 2>/dev/null
+                
                 if grep -q "port=\"${PUERTO}\"" "$TOMCAT_XML"; then
-                    fn_info "Puerto ${PUERTO} confirmado en $TOMCAT_XML"
+                    fn_ok "Puerto ${PUERTO} inyectado y verificado en server.xml."
                 else
-                    fn_err "No se pudo cambiar el puerto en $TOMCAT_XML. Intentando forzar..."
-                    sed -i "s/Connector port=\"8080\"/Connector port=\"${PUERTO}\"/g" "$TOMCAT_XML"
+                    fn_err "No se pudo forzar el cambio en server.xml."
                 fi
             else
                 fn_err "No se encontro server.xml de Tomcat."
             fi
 
-            # Crear una pagina de prueba para Tomcat (index.jsp)
+            # Crear pagina de bienvenida JSP personalizada
             local TOMCAT_ROOT="/var/lib/tomcat/webapps/ROOT"
             mkdir -p "$TOMCAT_ROOT"
             chown -R tomcat:tomcat "$TOMCAT_ROOT" 2>/dev/null
@@ -803,20 +812,11 @@ HTMLEOF
 <%@ page language="java" contentType="text/html; charset=UTF-8" pageEncoding="UTF-8"%>
 <!DOCTYPE html>
 <html>
-<head>
-    <title>Tomcat - Mageia Linux</title>
-    <style>
-        body { font-family: sans-serif; background: #f0f4f8; text-align: center; padding-top: 50px; }
-        .container { background: white; display: inline-block; padding: 40px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-top: 5px solid #f44336; }
-        h1 { color: #f44336; }
-        .footer { margin-top: 20px; color: #666; font-size: 0.8em; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Tomcat/Mageia - ACTIVO</h1>
-        <p>Servidor: Linux | Puerto: <%= request.getServerPort() %></p>
-        <div class="footer">Aprovisionamiento Automático - Práctica 7</div>
+<body style="background:#f0f7ff; color:#333; text-align:center; padding-top:100px; font-family:sans-serif;">
+    <div style="background:white; border-radius:15px; display:inline-block; padding:50px; box-shadow:0 10px 25px rgba(0,0,0,0.1); border-top: 6px solid #f44336;">
+        <h1 style="color:#f44336;">Tomcat - MAGEIA LINUX</h1>
+        <h2 style="color:#2c3e50;">¡Servicio Activo en el Puerto ${PUERTO}!</h2>
+        <p>Aprovisionado exitosamente por el script de la Práctica 7.</p>
     </div>
 </body>
 </html>
@@ -825,17 +825,22 @@ JSPEOF
             systemctl enable --now tomcat 2>/dev/null
             systemctl restart tomcat
             
-            # Abrir puerto en firewall de Mageia
-            firewall-cmd --permanent --add-port=${PUERTO}/tcp 2>/dev/null && firewall-cmd --reload 2>/dev/null
+            # Forzar apertura en el firewall
+            if command -v firewall-cmd &>/dev/null; then
+                firewall-cmd --permanent --add-port=${PUERTO}/tcp 2>/dev/null
+                firewall-cmd --reload 2>/dev/null
+                fn_ok "Firewall configurado para puerto ${PUERTO}."
+            fi
             
-            # Espera paciente para Tomcat (Java tarda en arrancar)
-            fn_info "Esperando a que Tomcat inicie (esto toma unos segundos)..."
+            # Verificacion con paciencia extrema (30 segundos total)
+            fn_info "Verificando arranque de Tomcat (30 segs max)..."
             local ATTEMPTS=0
             local MAX_ATTEMPTS=15
             local STARTED=false
             while [ $ATTEMPTS -lt $MAX_ATTEMPTS ]; do
+                # Usamos ss -tlnp que es mas fiable que nc en algunos sistemas
                 if ss -tlnp 2>/dev/null | grep -q ":${PUERTO} "; then
-                    fn_ok "Tomcat ya responde en el puerto ${PUERTO}."
+                    fn_ok "Tomcat esta escuchando en el puerto ${PUERTO}."
                     STARTED=true
                     break
                 fi
@@ -844,12 +849,12 @@ JSPEOF
             done
             
             if [ "$STARTED" = "false" ]; then
-                fn_err "Tomcat sigue sin responder después de 30s."
-                fn_info "Mostrando logs de error de Tomcat:"
-                journalctl -u tomcat -n 20 --no-pager
+                fn_err "Tomcat sigue sin responder después de la espera."
+                fn_info "Causa probable (Ultimos logs):"
+                journalctl -u tomcat -n 15 --no-pager
                 return 1
             else
-                fn_ok "Tomcat reiniciado exitosamente en el puerto ${PUERTO}."
+                fn_ok "Tomcat listo y desplegado."
             fi
             ;;
     esac
