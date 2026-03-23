@@ -696,22 +696,70 @@ HTMLEOF
             ;;
         nginx)
             fn_instalar_paquete "nginx" || { fn_err "Fallo la instalacion de Nginx."; return 1; }
-            systemctl enable --now nginx 2>/dev/null
             
+            local NGINX_CONF="/etc/nginx/nginx.conf"
+            if [ -f "$NGINX_CONF" ]; then
+                # Cambiar puerto predeterminado (listen 80)
+                sed -i "s/listen[[:space:]]\+80;/listen ${PUERTO};/" "$NGINX_CONF"
+                fn_info "Puerto ${PUERTO} configurado en $NGINX_CONF"
+                
+                # Configurar SSL si se solicita
+                if [ "$SSL" = "si" ]; then
+                    fn_generar_certificado_ssl "nginx"
+                    # Se busca el bloque server para habilitar ssl_certificate
+                    # En Mageia es mas seguro crear un archivo en conf.d
+                    cat > /etc/nginx/conf.d/ssl.conf <<NGXSSL
+server {
+    listen ${PUERTO} ssl;
+    server_name ${DOMINIO};
+    ssl_certificate ${SSL_DIR}/nginx/server.crt;
+    ssl_certificate_key ${SSL_DIR}/nginx/server.key;
+    location / {
+        root /usr/share/nginx/html;
+        index index.html;
+    }
+}
+NGXSSL
+                    fn_info "SSL de Nginx configurado en /etc/nginx/conf.d/ssl.conf"
+                fi
+            fi
+
+            # Crear pagina web dinamica para Nginx
             mkdir -p /usr/share/nginx/html
             cat > /usr/share/nginx/html/index.html <<HTMLEOF
 <!DOCTYPE html>
-<html>
-<body style="background:#1a1a2e;color:white;text-align:center;padding-top:100px;font-family:sans-serif;">
-    <h1 style="color:#e94560;">Nginx/Mageia</h1>
-    <div style="background:#16213e;display:inline-block;padding:30px;border-radius:10px;">
-        <p>Servidor: Linux | Puerto: ${PUERTO}</p>
-        <p>Práctica 7 - Mageia Linux</p>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Nginx - Mageia Linux</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background: #0f172a; color: #fff;
+               display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .card { background: #1e293b; padding: 40px; border-radius: 12px;
+                box-shadow: 0 4px 20px rgba(0,0,0,0.5); text-align: center; border-left: 5px solid #38bdf8; }
+        h1 { color: #38bdf8; margin-bottom: 20px; }
+        .badge { display: inline-block; background: #334155; padding: 8px 16px;
+                 border-radius: 8px; margin: 5px; font-weight: bold; }
+        .port-badge { background: #0ea5e9; }
+        .footer { font-size: 0.9em; color: #94a3b8; margin-top: 25px; border-top: 1px solid #334155; padding-top: 10px; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>Nginx + Mageia - ACTIVO</h1>
+        <div>
+            <span class="badge">Srv: Linux</span>
+            <span class="badge port-badge">Puerto: ${PUERTO}</span>
+        </div>
+        <div class="footer">Aprovisionamiento Automático - Práctica 7</div>
     </div>
 </body>
 </html>
 HTMLEOF
-            fn_ok "Nginx instalado y activo."
+            
+            systemctl enable --now nginx 2>/dev/null
+            systemctl restart nginx
+            fn_ok "Nginx reiniciado exitosamente en el puerto ${PUERTO}."
             ;;
         tomcat)
             fn_instalar_paquete "tomcat" || { fn_err "Fallo la instalacion de Tomcat."; return 1; }
