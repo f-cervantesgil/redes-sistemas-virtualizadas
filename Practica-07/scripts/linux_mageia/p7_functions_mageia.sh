@@ -802,6 +802,27 @@ JSPEOF
 
             systemctl enable --now tomcat 2>/dev/null
             systemctl restart tomcat
+            
+            # Abrir puerto en firewall de Mageia
+            firewall-cmd --permanent --add-port=${PUERTO}/tcp 2>/dev/null && firewall-cmd --reload 2>/dev/null
+            
+            # Espera paciente para Tomcat (Java tarda en arrancar)
+            fn_info "Esperando a que Tomcat inicie (esto toma unos segundos)..."
+            local ATTEMPTS=0
+            local MAX_ATTEMPTS=10
+            while [ $ATTEMPTS -lt $MAX_ATTEMPTS ]; do
+                if nc -z -w 1 localhost ${PUERTO} 2>/dev/null; then
+                    fn_ok "Tomcat ya responde en el puerto ${PUERTO}."
+                    break
+                fi
+                sleep 2
+                ATTEMPTS=$((ATTEMPTS + 1))
+            done
+            
+            if [ $ATTEMPTS -eq $MAX_ATTEMPTS ]; then
+                fn_err "Tomcat sigue sin responder. Revisa 'systemctl status tomcat'."
+            fi
+            
             fn_ok "Tomcat reiniciado exitosamente en el puerto ${PUERTO}."
             ;;
     esac
