@@ -636,21 +636,31 @@ fn_instalar_web_con_ssl() {
             systemctl enable httpd 2>/dev/null || systemctl enable apache2 2>/dev/null
             systemctl restart httpd || systemctl restart apache2
             
-            # Crear pagina web dinamica para Apache
-            # Mageia usa /var/www/html por defecto
-            mkdir -p /var/www/html
-            cat > /var/www/html/index.html <<HTMLEOF
+            # Crear pagina web dinamica para Apache (Mageia detecta DocumentRoot)
+            local REAL_DOCROOT
+            REAL_DOCROOT=$(grep "^DocumentRoot" "$CONF_PATH" | awk '{print $2}' | tr -d '"' | sed 's|^/||;s|$|/|;s|^|/|' || echo "/var/www/html")
+            [ ! -d "$REAL_DOCROOT" ] && REAL_DOCROOT="/var/www/html"
+            
+            fn_info "Generando index.html en $REAL_DOCROOT..."
+            mkdir -p "$REAL_DOCROOT"
+            rm -f "$REAL_DOCROOT/index.html"
+            
+            cat > "$REAL_DOCROOT/index.html" <<HTMLEOF
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <title>Apache - Mageia Linux</title>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #1a1a2e; color: #eee;
                display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
         .card { background: #16213e; padding: 40px 60px; border-radius: 12px;
-                box-shadow: 0 10px 30px rgba(0,0,0,0.5); text-align: center; width: 450px; }
-        h1 { color: #e94560; font-size: 2.5em; margin-bottom: 25px; }
+                box-shadow: 0 10px 30px rgba(0,0,0,0.5); text-align: center; width: 450px;
+                border-left: 5px solid #e94560; }
+        h1 { color: #4ade80; font-size: 2.5em; margin-bottom: 25px; }
         .badge { display: inline-block; background: #0f3460; padding: 8px 18px;
                  border-radius: 8px; margin: 5px; font-weight: bold; }
         .port-badge { background: #e94560; color: white; }
@@ -659,21 +669,21 @@ fn_instalar_web_con_ssl() {
 </head>
 <body>
     <div class="card">
-        <h1>Apache/Mageia</h1>
+        <h1>Apache - ACTIVO</h1>
         <div>
             <span class="badge">Servidor: Linux</span>
-            <span class="badge">Versión: Latest</span>
+            <span class="badge">OS: Mageia</span>
             <span class="badge port-badge">Puerto: ${PUERTO}</span>
         </div>
         <div class="footer">
-            Aprovisionado automáticamente - Práctica 7 - Mageia Linux
+            Aprovisionamiento Automático - Práctica 7 - Mageia Linux
         </div>
     </div>
 </body>
 </html>
 HTMLEOF
-            fn_ok "Pagina web de Apache generada en el puerto ${PUERTO}."
-            fn_ok "Apache reiniciado."
+            fn_ok "Pagina web de Apache generada en $REAL_DOCROOT para puerto ${PUERTO}."
+            fn_ok "Apache reiniciado exitosamente."
             ;;
         nginx)
             fn_instalar_paquete "nginx" || { fn_err "Fallo la instalacion de Nginx."; return 1; }
