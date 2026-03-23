@@ -763,8 +763,46 @@ HTMLEOF
             ;;
         tomcat)
             fn_instalar_paquete "tomcat" || { fn_err "Fallo la instalacion de Tomcat."; return 1; }
+            
+            local TOMCAT_XML="/etc/tomcat/server.xml"
+            if [ -f "$TOMCAT_XML" ]; then
+                # Cambiar puerto 8080 por el puerto personalizado
+                sed -i "s/port=\"8080\"/port=\"${PUERTO}\"/" "$TOMCAT_XML"
+                fn_info "Puerto ${PUERTO} configurado en $TOMCAT_XML"
+            else
+                fn_err "No se encontro server.xml de Tomcat."
+            fi
+
+            # Crear una pagina de prueba para Tomcat (index.jsp)
+            # En Mageia suele estar en /var/lib/tomcat/webapps/ROOT/
+            local TOMCAT_ROOT="/var/lib/tomcat/webapps/ROOT"
+            mkdir -p "$TOMCAT_ROOT"
+            cat > "$TOMCAT_ROOT/index.jsp" <<JSPEOF
+<%@ page language="java" contentType="text/html; charset=UTF-8" pageEncoding="UTF-8"%>
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Tomcat - Mageia Linux</title>
+    <style>
+        body { font-family: sans-serif; background: #f0f4f8; text-align: center; padding-top: 50px; }
+        .container { background: white; display: inline-block; padding: 40px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-top: 5px solid #f44336; }
+        h1 { color: #f44336; }
+        .footer { margin-top: 20px; color: #666; font-size: 0.8em; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Tomcat/Mageia - ACTIVO</h1>
+        <p>Servidor: Linux | Puerto: <%= request.getServerPort() %></p>
+        <div class="footer">Aprovisionamiento Automático - Práctica 7</div>
+    </div>
+</body>
+</html>
+JSPEOF
+
             systemctl enable --now tomcat 2>/dev/null
-            fn_ok "Tomcat instalado y activo."
+            systemctl restart tomcat
+            fn_ok "Tomcat reiniciado exitosamente en el puerto ${PUERTO}."
             ;;
     esac
     RESUMEN_INSTALACIONES="${RESUMEN_INSTALACIONES}\n[${SERVICIO}] Puerto: ${PUERTO} | SSL: ${SSL} | Origen: WEB"
