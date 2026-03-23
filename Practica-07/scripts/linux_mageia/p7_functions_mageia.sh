@@ -579,23 +579,38 @@ fn_configurar_ftps() {
     [ ! -f "$VSFTPD_CONF" ] && VSFTPD_CONF="/etc/vsftpd.conf"
 
     if [ -f "$VSFTPD_CONF" ]; then
-        sed -i '/ssl_enable/d' "$VSFTPD_CONF"
-        cat >> "$VSFTPD_CONF" <<FTPSEOF
+        fn_info "Generando configuracion limpia de vsftpd para Mageia..."
+        cat > "$VSFTPD_CONF" <<FTPSEOF
+# Configuración corregida para Mageia
+anonymous_enable=YES
+local_enable=YES
+write_enable=YES
+local_umask=022
+dirmessage_enable=YES
+xferlog_enable=YES
+connect_from_port_20=YES
+xferlog_std_format=YES
+listen=YES
+listen_ipv6=NO
+pam_service_name=vsftpd
+userlist_enable=YES
+tcp_wrappers=YES
+
+# Configuración SSL (FTPS)
 ssl_enable=YES
-rsa_cert_file=${SSL_DIR}/vsftpd/vsftpd.crt
-rsa_private_key_file=${SSL_DIR}/vsftpd/vsftpd.key
+allow_anon_ssl=YES
 force_local_data_ssl=YES
 force_local_logins_ssl=YES
+ssl_tlsv1=YES
 ssl_sslv2=NO
 ssl_sslv3=NO
-ssl_tlsv1=YES
-ssl_tlsv1_1=YES
-ssl_tlsv1_2=YES
 require_ssl_reuse=NO
 ssl_ciphers=HIGH
+rsa_cert_file=${SSL_DIR}/vsftpd/vsftpd.crt
+rsa_private_key_file=${SSL_DIR}/vsftpd/vsftpd.key
 FTPSEOF
         systemctl restart vsftpd 2>/dev/null
-        fn_ok "vsftpd reiniciado con SSL (Mageia)."
+        fn_ok "vsftpd reiniciado con configuracion limpia y SSL."
     else
         fn_err "No se encontro vsftpd.conf"
     fi
@@ -774,9 +789,9 @@ HTMLEOF
             fi
 
             # Crear una pagina de prueba para Tomcat (index.jsp)
-            # En Mageia suele estar en /var/lib/tomcat/webapps/ROOT/
             local TOMCAT_ROOT="/var/lib/tomcat/webapps/ROOT"
             mkdir -p "$TOMCAT_ROOT"
+            chown -R tomcat:tomcat "$TOMCAT_ROOT" 2>/dev/null
             cat > "$TOMCAT_ROOT/index.jsp" <<JSPEOF
 <%@ page language="java" contentType="text/html; charset=UTF-8" pageEncoding="UTF-8"%>
 <!DOCTYPE html>
@@ -809,21 +824,26 @@ JSPEOF
             # Espera paciente para Tomcat (Java tarda en arrancar)
             fn_info "Esperando a que Tomcat inicie (esto toma unos segundos)..."
             local ATTEMPTS=0
-            local MAX_ATTEMPTS=10
+            local MAX_ATTEMPTS=15
+            local STARTED=false
             while [ $ATTEMPTS -lt $MAX_ATTEMPTS ]; do
-                if nc -z -w 1 localhost ${PUERTO} 2>/dev/null; then
+                if ss -tlnp 2>/dev/null | grep -q ":${PUERTO} "; then
                     fn_ok "Tomcat ya responde en el puerto ${PUERTO}."
+                    STARTED=true
                     break
                 fi
                 sleep 2
                 ATTEMPTS=$((ATTEMPTS + 1))
             done
             
-            if [ $ATTEMPTS -eq $MAX_ATTEMPTS ]; then
-                fn_err "Tomcat sigue sin responder. Revisa 'systemctl status tomcat'."
+            if [ "$STARTED" = "false" ]; then
+                fn_err "Tomcat sigue sin responder después de 30s."
+                fn_info "Mostrando logs de error de Tomcat:"
+                journalctl -u tomcat -n 20 --no-pager
+                return 1
+            else
+                fn_ok "Tomcat reiniciado exitosamente en el puerto ${PUERTO}."
             fi
-            
-            fn_ok "Tomcat reiniciado exitosamente en el puerto ${PUERTO}."
             ;;
     esac
     RESUMEN_INSTALACIONES="${RESUMEN_INSTALACIONES}\n[${SERVICIO}] Puerto: ${PUERTO} | SSL: ${SSL} | Origen: WEB"
