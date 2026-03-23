@@ -777,32 +777,37 @@ HTMLEOF
             fn_ok "Nginx reiniciado exitosamente en el puerto ${PUERTO}."
             ;;
         tomcat)
+            fn_info "Iniciando 'Solución Nuclear' para Tomcat (Mageia)..."
             fn_instalar_paquete "tomcat" || { fn_err "Fallo la instalacion de Tomcat."; return 1; }
             
+            # Detener el servicio primero para evitar bloqueos
+            systemctl stop tomcat 2>/dev/null
+            
             local TOMCAT_XML="/etc/tomcat/server.xml"
-            if [ -f "$TOMCAT_XML" ]; then
-                fn_info "Auditando $TOMCAT_XML para forzar puerto ${PUERTO}..."
-                
-                # REGLA DE ORO: Descomentar el bloque si esta comentado y cambiar el puerto 8080
-                # Buscamos <Connector port="8080" y quitamos comentarios alrededor de ese bloque si existen.
-                # Luego cambiamos 8080 por el nuevo puerto.
-                sed -i 's/<!--.*port=["'\'']8080["'\'']/ <Connector port="8080"/g' "$TOMCAT_XML"
-                sed -i 's/port=["'\'']8080["'\''].*-->/port="8080" \/>/g' "$TOMCAT_XML"
-                
-                # Ahora cambiamos el puerto 8080 real a el nuevo puerto
-                sed -i "s/port=['\"]8080['\"]/port=\"${PUERTO}\"/g" "$TOMCAT_XML"
-                
-                # Dar permisos para que Tomcat pueda leer el archivo al iniciar
-                chown -R tomcat:tomcat /etc/tomcat 2>/dev/null
-                
-                if grep -q "port=\"${PUERTO}\"" "$TOMCAT_XML"; then
-                    fn_ok "Puerto ${PUERTO} inyectado y verificado en server.xml."
-                else
-                    fn_err "No se pudo forzar el cambio en server.xml."
-                fi
-            else
-                fn_err "No se encontro server.xml de Tomcat."
-            fi
+            fn_info "Generando configuracion MINIMA LIMPIA para Tomcat en puerto ${PUERTO}..."
+            
+            # Sobreescribimos COMPLETAMENTE el server.xml con una version minimalista conocida que funciona
+            cat > "$TOMCAT_XML" <<TOMCAT_EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<Server port="-1" shutdown="SHUTDOWN">
+  <Service name="Catalina">
+    <Connector port="${PUERTO}" protocol="HTTP/1.1" 
+               connectionTimeout="20000" 
+               redirectPort="8443" />
+    <Engine name="Catalina" defaultHost="localhost">
+      <Host name="localhost"  appBase="webapps" unpackWARs="true" autoDeploy="true">
+        <Valve className="org.apache.catalina.valves.AccessLogValve" directory="logs" 
+               prefix="localhost_access_log" suffix=".txt" pattern="%h %l %u %t &quot;%r&quot; %s %b" />
+      </Host>
+    </Engine>
+  </Service>
+</Server>
+TOMCAT_EOF
+
+            # Limpiar cache y asegurar permisos
+            rm -rf /var/lib/tomcat/work/*
+            chown -R tomcat:tomcat /etc/tomcat /var/lib/tomcat /var/log/tomcat 2>/dev/null
+            chmod 644 "$TOMCAT_XML"
 
             # Crear pagina de bienvenida JSP personalizada
             local TOMCAT_ROOT="/var/lib/tomcat/webapps/ROOT"
@@ -827,6 +832,7 @@ JSPEOF
             
             # Forzar apertura en el firewall
             if command -v firewall-cmd &>/dev/null; then
+                firewall-cmd --permanent --remove-port=8080/tcp 2>/dev/null
                 firewall-cmd --permanent --add-port=${PUERTO}/tcp 2>/dev/null
                 firewall-cmd --reload 2>/dev/null
                 fn_ok "Firewall configurado para puerto ${PUERTO}."
@@ -838,7 +844,6 @@ JSPEOF
             local MAX_ATTEMPTS=15
             local STARTED=false
             while [ $ATTEMPTS -lt $MAX_ATTEMPTS ]; do
-                # Usamos ss -tlnp que es mas fiable que nc en algunos sistemas
                 if ss -tlnp 2>/dev/null | grep -q ":${PUERTO} "; then
                     fn_ok "Tomcat esta escuchando en el puerto ${PUERTO}."
                     STARTED=true
