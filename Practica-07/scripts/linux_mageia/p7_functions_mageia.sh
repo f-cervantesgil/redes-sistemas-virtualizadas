@@ -614,18 +614,28 @@ fn_instalar_web_con_ssl() {
             [ ! -f "$CONF_PATH" ] && CONF_PATH="/etc/apache2/conf/httpd.conf"
             
             if [ -f "$CONF_PATH" ]; then
-                sed -i "s/^Listen 80/Listen ${PUERTO}/" "$CONF_PATH"
+                # Reemplazo mas agresivo: cualquier linea que empiece con Listen seguira con el puerto elegido
+                sed -i "s/^Listen .*/Listen ${PUERTO}/" "$CONF_PATH"
                 sed -i "s/^ServerName .*/ServerName ${DOMINIO}:${PUERTO}/" "$CONF_PATH"
+                fn_info "Configuracion de puerto ${PUERTO} aplicada en $CONF_PATH"
+            else
+                fn_err "No se encontro httpd.conf en rutas estandar."
             fi
 
             if [ "$SSL" = "si" ]; then
                 fn_instalar_paquete "apache-mod_ssl" || { fn_err "Fallo la instalacion de mod_ssl."; return 1; }
                 fn_generar_certificado_ssl "apache"
-                # Path Mageia: /etc/httpd/conf.d/ssl.conf
+                # Path Mageia SSL: /etc/httpd/conf.d/ssl.conf
+                if [ -f "/etc/httpd/conf.d/ssl.conf" ]; then
+                    sed -i "s|^SSLCertificateFile.*|SSLCertificateFile ${SSL_DIR}/apache/server.crt|" /etc/httpd/conf.d/ssl.conf 2>/dev/null
+                    sed -i "s|^SSLCertificateKeyFile.*|SSLCertificateKeyFile ${SSL_DIR}/apache/server.key|" /etc/httpd/conf.d/ssl.conf 2>/dev/null
+                fi
             fi
             
-            systemctl enable --now httpd 2>/dev/null || systemctl enable --now apache2 2>/dev/null
-            fn_ok "Apache instalado y activo."
+            fn_info "Reiniciando el servicio para aplicar cambios..."
+            systemctl enable httpd 2>/dev/null || systemctl enable apache2 2>/dev/null
+            systemctl restart httpd || systemctl restart apache2
+            fn_ok "Apache reiniciado."
             ;;
         nginx)
             fn_instalar_paquete "nginx" || { fn_err "Fallo la instalacion de Nginx."; return 1; }
