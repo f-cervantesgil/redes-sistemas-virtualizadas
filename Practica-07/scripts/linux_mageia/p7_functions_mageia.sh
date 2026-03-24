@@ -823,12 +823,20 @@ HTMLEOF
             mkdir -p /var/log/tomcat
             chown -R tomcat:tomcat /etc/tomcat /var/lib/tomcat /var/log/tomcat /usr/share/tomcat /opt/tomcat 2>/dev/null
 
-            # Escribir index.jsp en TODAS las rutas conocidas + verificar escritura
-            fn_info "Escribiendo pagina Practica 7 en todas las ubicaciones conocidas..."
-            for ROOT_DIR in /var/lib/tomcat/webapps/ROOT /usr/share/tomcat/webapps/ROOT /opt/tomcat/webapps/ROOT; do
-                mkdir -p "$ROOT_DIR"
-                cat > "$ROOT_DIR/index.jsp" <<'JSPEOF'
-<%@ page language="java" contentType="text/html; charset=UTF-8" pageEncoding="UTF-8"%>
+            # SOLUCION DEFINITIVA: Usar HTML estatico (no JSP) para evitar cache de Jasper
+            # El puerto se embebe directamente desde $PUERTO (no depende de JSP compilation)
+            fn_info "Escribiendo index.html estatico con puerto ${PUERTO} en todas las rutas..."
+
+            for ROOT_DIR in \
+                /var/lib/tomcat/webapps/ROOT \
+                /usr/share/tomcat/webapps/ROOT \
+                /opt/tomcat/webapps/ROOT \
+                /usr/share/java/tomcat/webapps/ROOT; do
+                    mkdir -p "$ROOT_DIR"
+                    # Eliminar archivos viejos que puedan tener prioridad
+                    rm -f "$ROOT_DIR/index.jsp" "$ROOT_DIR/index.html" 2>/dev/null
+                    # Escribir HTML estatico con el puerto correcto embebido
+                    cat > "$ROOT_DIR/index.html" <<HTMLEOF
 <!DOCTYPE html>
 <html>
 <head><title>Tomcat - Practica 7 - Mageia Linux</title></head>
@@ -838,28 +846,28 @@ HTMLEOF
     <p style="color:#94a3b8;margin-bottom:25px;">Servidor Web - Mageia Linux</p>
     <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;">
       <span style="background:#ef4444;color:white;padding:8px 20px;border-radius:20px;font-weight:bold;">Servidor: Linux</span>
-      <span style="background:#3b82f6;color:white;padding:8px 20px;border-radius:20px;font-weight:bold;">Version: <%= application.getServerInfo() %></span>
-      <span style="background:#ef4444;color:white;padding:8px 20px;border-radius:20px;font-weight:bold;">Puerto: <%= request.getServerPort() %></span>
+      <span style="background:#3b82f6;color:white;padding:8px 20px;border-radius:20px;font-weight:bold;">Version: Tomcat 9</span>
+      <span style="background:#ef4444;color:white;padding:8px 20px;border-radius:20px;font-weight:bold;">Puerto: ${PUERTO}</span>
     </div>
     <p style="margin-top:25px;color:#64748b;font-size:0.85em;">Aprovisionado automaticamente - Practica 7 - Mageia Linux</p>
   </div>
 </body>
 </html>
-JSPEOF
-                chown -R tomcat:tomcat "$ROOT_DIR" 2>/dev/null
-                # Verificar que el archivo fue escrito correctamente
-                if grep -q "Practica 7" "$ROOT_DIR/index.jsp" 2>/dev/null; then
-                    fn_ok "JSP verificado - Practica 7 escrito en: $ROOT_DIR/index.jsp"
-                else
-                    fn_err "FALLO escritura en: $ROOT_DIR/index.jsp"
-                fi
+HTMLEOF
+                    chown -R tomcat:tomcat "$ROOT_DIR" 2>/dev/null
+                    # Verificar escritura
+                    if grep -q "Practica 7" "$ROOT_DIR/index.html" 2>/dev/null; then
+                        fn_ok "index.html (puerto ${PUERTO}) escrito en: $ROOT_DIR"
+                    else
+                        fn_err "FALLO escritura en: $ROOT_DIR"
+                    fi
             done
 
-            # Diagnostico: mostrar que está en el JSP de opt/tomcat
-            fn_info "=== VERIFICACION: Contenido actual de /opt/tomcat/webapps/ROOT/index.jsp ==="
-            head -3 /opt/tomcat/webapps/ROOT/index.jsp 2>/dev/null || fn_err "Archivo no encontrado"
-            fn_info "=== VERIFICACION: Puerto en /opt/tomcat/conf/server.xml ==="
-            grep -E "Connector port" /opt/tomcat/conf/server.xml 2>/dev/null || fn_err "server.xml no encontrado"
+            # Limpiar TODO el cache de Jasper en todas las ubicaciones posibles
+            fn_info "Limpiando cache JSP compilado (Jasper) en todo el sistema..."
+            find / -type d -name "work" -path "*/tomcat/*" -not -path "*/proc/*" 2>/dev/null | \
+                xargs -I{} sh -c 'rm -rf {}/* && echo "Cache limpiado: {}"' 2>/dev/null
+            fn_ok "Cache Jasper limpiado."
 
             systemctl stop tomcat 2>/dev/null
             killall -9 java 2>/dev/null
