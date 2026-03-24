@@ -823,7 +823,7 @@ HTMLEOF
             mkdir -p /var/log/tomcat
             chown -R tomcat:tomcat /etc/tomcat /var/lib/tomcat /var/log/tomcat /usr/share/tomcat /opt/tomcat 2>/dev/null
 
-            # Escribir index.jsp en TODAS las rutas conocidas (sin loops complejos)
+            # Escribir index.jsp en TODAS las rutas conocidas + verificar escritura
             fn_info "Escribiendo pagina Practica 7 en todas las ubicaciones conocidas..."
             for ROOT_DIR in /var/lib/tomcat/webapps/ROOT /usr/share/tomcat/webapps/ROOT /opt/tomcat/webapps/ROOT; do
                 mkdir -p "$ROOT_DIR"
@@ -847,13 +847,24 @@ HTMLEOF
 </html>
 JSPEOF
                 chown -R tomcat:tomcat "$ROOT_DIR" 2>/dev/null
-                fn_ok "JSP escrito en: $ROOT_DIR/index.jsp"
+                # Verificar que el archivo fue escrito correctamente
+                if grep -q "Practica 7" "$ROOT_DIR/index.jsp" 2>/dev/null; then
+                    fn_ok "JSP verificado - Practica 7 escrito en: $ROOT_DIR/index.jsp"
+                else
+                    fn_err "FALLO escritura en: $ROOT_DIR/index.jsp"
+                fi
             done
 
+            # Diagnostico: mostrar que está en el JSP de opt/tomcat
+            fn_info "=== VERIFICACION: Contenido actual de /opt/tomcat/webapps/ROOT/index.jsp ==="
+            head -3 /opt/tomcat/webapps/ROOT/index.jsp 2>/dev/null || fn_err "Archivo no encontrado"
+            fn_info "=== VERIFICACION: Puerto en /opt/tomcat/conf/server.xml ==="
+            grep -E "Connector port" /opt/tomcat/conf/server.xml 2>/dev/null || fn_err "server.xml no encontrado"
 
             systemctl stop tomcat 2>/dev/null
             killall -9 java 2>/dev/null
             pkill -9 -f tomcat 2>/dev/null
+
 
             systemctl enable --now tomcat 2>/dev/null
             systemctl start tomcat
