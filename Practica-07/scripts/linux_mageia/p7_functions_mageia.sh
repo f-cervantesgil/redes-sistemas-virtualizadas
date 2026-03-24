@@ -360,6 +360,13 @@ fn_instalar_apache_ftp() {
     fn_ok "Apache compilado e instalado en /usr/local/apache2"
 
     local CONF="/usr/local/apache2/conf/httpd.conf"
+    
+    # Prevenir que se dupliquen configuraciones si el usuario ejecuta el script varias veces:
+    # Restituimos el archivo limpio original antes de editarlo
+    if [ -f "/usr/local/apache2/conf/original/httpd.conf" ]; then
+        cp "/usr/local/apache2/conf/original/httpd.conf" "$CONF"
+    fi
+
     sed -i "s/^Listen .*/Listen ${PUERTO}/" "$CONF"
     sed -i "s/^ServerName .*/ServerName ${DOMINIO}:${PUERTO}/" "$CONF"
 
