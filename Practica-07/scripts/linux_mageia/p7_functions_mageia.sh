@@ -576,6 +576,11 @@ fn_configurar_ftps() {
         2>/dev/null
 
     # Crear jerarquia de directorios FTP: /pub/linux/{apache,nginx,tomcat}
+    fn_info "Limpiando estructura anterior de la Practica 6..."
+    rm -rf /srv/ftp/http 2>/dev/null
+    rm -rf /srv/ftp/Linux 2>/dev/null
+    fn_ok "Estructura antigua eliminada."
+
     fn_info "Creando estructura de directorios FTP: /pub/linux/{apache,nginx,tomcat}..."
     local FTP_ROOT="/srv/ftp"
     mkdir -p "${FTP_ROOT}/pub/linux/apache"
