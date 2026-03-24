@@ -793,7 +793,8 @@ HTMLEOF
             # (Tomcat en Mageia puede leer de /usr/share/tomcat/conf/ en lugar de /etc/tomcat/)
             fn_info "Buscando todos los archivos server.xml en el sistema..."
             local SERVER_XML_LIST
-            SERVER_XML_LIST=$(find /etc/tomcat /usr/share/tomcat /var/lib/tomcat /opt/tomcat* 2>/dev/null -name "server.xml" -type f)
+            # Incluir /opt/tomcat explicitamente (donde Practica 6 instalo Tomcat)
+            SERVER_XML_LIST=$(find /etc/tomcat /usr/share/tomcat /var/lib/tomcat /opt/tomcat /opt/tomcat* 2>/dev/null -name "server.xml" -type f)
 
             if [ -z "$SERVER_XML_LIST" ]; then
                 fn_err "No se encontro ningun server.xml. Creando en /etc/tomcat/..."
@@ -819,7 +820,8 @@ HTMLEOF
 </Server>'
 
             # Sobreescribir TODOS los archivos server.xml encontrados
-            for XML_FILE in $SERVER_XML_LIST; do
+            echo "$SERVER_XML_LIST" | while IFS= read -r XML_FILE; do
+                [ -z "$XML_FILE" ] && continue
                 fn_info "Sobreescribiendo: $XML_FILE"
                 echo "$NEW_CONFIG" > "$XML_FILE"
                 chown tomcat:tomcat "$XML_FILE" 2>/dev/null
@@ -833,16 +835,12 @@ HTMLEOF
             mkdir -p /var/log/tomcat
             chown -R tomcat:tomcat /etc/tomcat /var/lib/tomcat /var/log/tomcat /usr/share/tomcat 2>/dev/null
 
-            # Buscar ABSOLUTAMENTE TODOS los index.jsp de Tomcat en el sistema y sobreescribirlos
-            fn_info "Buscando todos los index.jsp de Tomcat en el sistema..."
-            local JSP_LIST
-            JSP_LIST=$(find / -path "*/webapps/ROOT/index.jsp" -not -path "*/proc/*" 2>/dev/null)
-
-            # Asegurar que al menos existe uno de referencia
-            mkdir -p /var/lib/tomcat/webapps/ROOT
-            mkdir -p /usr/share/tomcat/webapps/ROOT 2>/dev/null
-
-            JSP_LIST="$JSP_LIST /var/lib/tomcat/webapps/ROOT/index.jsp /usr/share/tomcat/webapps/ROOT/index.jsp"
+            # Detectar CATALINA_BASE/HOME desde el servicio systemd
+            local CATALINA_BASE=""
+            CATALINA_BASE=$(grep -E "CATALINA_BASE|CATALINA_HOME" /usr/lib/systemd/system/tomcat.service \
+                            /etc/systemd/system/tomcat.service 2>/dev/null \
+                            | grep -oP '(?<==)[^ ]+' | head -1)
+            fn_info "CATALINA_BASE detectado: ${CATALINA_BASE:-no detectado, usando rutas por defecto}"
 
             # Contenido del nuevo index.jsp (Practica 7)
             local JSP_CONTENT='<%@ page language="java" contentType="text/html; charset=UTF-8" pageEncoding="UTF-8"%>
@@ -865,7 +863,28 @@ HTMLEOF
 </body>
 </html>'
 
-            # Escribir en todos los archivos encontrados usando while+read para rutas seguras
+            # Buscar ABSOLUTAMENTE TODOS los index.jsp bajo cualquier directorio webapps
+            fn_info "Buscando todos los index.jsp de Tomcat en el sistema (busqueda total)..."
+            local JSP_LIST
+            JSP_LIST=$(find / -name "index.jsp" -path "*/webapps/*" \
+                         -not -path "*/proc/*" -not -path "*/sys/*" 2>/dev/null | tr '\n' ' ')
+
+            # Asegurar rutas base siempre incluidas
+            mkdir -p /var/lib/tomcat/webapps/ROOT /usr/share/tomcat/webapps/ROOT 2>/dev/null
+            JSP_LIST="$JSP_LIST /var/lib/tomcat/webapps/ROOT/index.jsp /usr/share/tomcat/webapps/ROOT/index.jsp"
+
+            # Añadir /opt/tomcat EXPLICITAMENTE (Practica 6 instalo Tomcat ahi)
+            mkdir -p /opt/tomcat/webapps/ROOT 2>/dev/null
+            JSP_LIST="$JSP_LIST /opt/tomcat/webapps/ROOT/index.jsp"
+
+            # Añadir ruta de CATALINA_BASE si se detecto
+            if [ -n "$CATALINA_BASE" ]; then
+                mkdir -p "${CATALINA_BASE}/webapps/ROOT" 2>/dev/null
+                JSP_LIST="$JSP_LIST ${CATALINA_BASE}/webapps/ROOT/index.jsp"
+            fi
+
+
+            # Escribir en todos los archivos encontrados
             echo "$JSP_LIST" | tr ' ' '\n' | sort -u | while IFS= read -r JSP_FILE; do
                 [ -z "$JSP_FILE" ] && continue
                 JSP_DIR=$(dirname "$JSP_FILE")
