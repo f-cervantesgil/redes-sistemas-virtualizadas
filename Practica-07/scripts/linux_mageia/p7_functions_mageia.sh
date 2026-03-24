@@ -777,24 +777,27 @@ HTMLEOF
             fn_ok "Nginx reiniciado exitosamente en el puerto ${PUERTO}."
             ;;
         tomcat)
-            fn_info "Iniciando 'Solución Nuclear' para Tomcat (Mageia)..."
+            fn_info "Iniciando 'Solución Nuclear Final' para Tomcat (Mageia)..."
             fn_instalar_paquete "tomcat" || { fn_err "Fallo la instalacion de Tomcat."; return 1; }
             
-            # Detener el servicio y MATAR procesos residuales (Zombis)
+            # Detener el servicio y ELIMINAR CUALQUIER PROCESO JAVA (Limpia la practica anterior)
             systemctl stop tomcat 2>/dev/null
-            fn_info "Limpiando procesos internos de Java/Tomcat..."
+            fn_info "Realizando limpieza de procesos Java y puertos de control (8005)..."
             killall -9 java 2>/dev/null
             pkill -9 -f tomcat 2>/dev/null
             
             local TOMCAT_XML="/etc/tomcat/server.xml"
-            fn_info "Generando configuracion MINIMA LIMPIA para Tomcat en puerto ${PUERTO}..."
+            fn_info "Generando configuracion MINIMA BLINDADA para Tomcat en puerto ${PUERTO}..."
             
             # Sobreescribimos COMPLETAMENTE el server.xml con una version minimalista conocida que funciona
+            # Se usa port="-1" en Server para desactivar el puerto de control y evitar conflictos
+            # Se usa address="0.0.0.0" para asegurar escucha externa
             cat > "$TOMCAT_XML" <<TOMCAT_EOF
 <?xml version="1.0" encoding="UTF-8"?>
-<Server port="8005" shutdown="SHUTDOWN">
+<Server port="-1" shutdown="SHUTDOWN">
   <Service name="Catalina">
     <Connector port="${PUERTO}" protocol="HTTP/1.1" 
+               address="0.0.0.0"
                connectionTimeout="20000" 
                redirectPort="8443" />
     <Engine name="Catalina" defaultHost="localhost">
@@ -824,6 +827,7 @@ TOMCAT_EOF
         <h1 style="color:#f44336;">Tomcat - MAGEIA LINUX</h1>
         <h2 style="color:#2c3e50;">¡Servicio Activo en el Puerto ${PUERTO}!</h2>
         <p>Aprovisionado exitosamente por el script de la Práctica 7.</p>
+        <p>Control de sesión: Limpio (Puerto 8005 deshabilitado)</p>
     </div>
 </body>
 </html>
