@@ -404,9 +404,20 @@ SSLEOF
 </html>
 HTMLEOF
 
+    # Matar cualquier servicio HTTPD/Nginx previo que pueda estar bloqueando los puertos (ej. 443)
+    systemctl stop httpd nginx 2>/dev/null
+    killall -9 httpd apache2 nginx 2>/dev/null
+    sleep 2
+
     /usr/local/apache2/bin/apachectl start 2>/dev/null
-    fn_ok "Apache iniciado."
+    if [ $? -ne 0 ]; then
+        fn_err "apachectl start fallo. Posible puerto bloqueado."
+    else
+        fn_ok "Apache iniciado."
+    fi
+
     RESUMEN_INSTALACIONES="${RESUMEN_INSTALACIONES}\n[Apache] Puerto: ${PUERTO} | SSL: ${SSL} | Origen: FTP"
+
     return 0
 }
 
