@@ -61,9 +61,9 @@ fn_instalar_paquete() {
     fn_info "Ejecutando instalacion de: ${PKG}..."
     if command -v dnf &>/dev/null; then
         # dnf puede tardar en sincronizar repositorios. Se quita el silencio para ver el progreso.
-        dnf install -y "$PKG"
+        dnf install -y $PKG
     elif command -v urpmi &>/dev/null; then
-        urpmi --auto "$PKG"
+        urpmi --auto $PKG
     else
         fn_err "No se detecto gestor de paquetes (dnf/urpmi)."
         return 1
@@ -606,25 +606,25 @@ fn_configurar_ftps() {
     rm -f "${FTP_ROOT}/pub/linux/nginx/"*.rpm 2>/dev/null
     rm -f "${FTP_ROOT}/pub/linux/tomcat/"*.rpm 2>/dev/null
 
+    # Forzar descarga borrando archivos corruptos previos
+    rm -f "${FTP_ROOT}/pub/linux/apache/"*.tar.gz 2>/dev/null
+    rm -f "${FTP_ROOT}/pub/linux/nginx/"*.tar.gz 2>/dev/null
+    rm -f "${FTP_ROOT}/pub/linux/tomcat/"*.tar.gz 2>/dev/null
+
     if command -v curl &>/dev/null; then
         fn_info "Descargando web server source/binaries en fondo..."
         
         # Apache (Source)
-        if [ ! -f "${FTP_ROOT}/pub/linux/apache/httpd-2.4.62.tar.gz" ]; then
-            curl -s -L -o "${FTP_ROOT}/pub/linux/apache/httpd-2.4.62.tar.gz" https://dlcdn.apache.org/httpd/httpd-2.4.62.tar.gz &
-        fi
+        curl -s -L -f -o "${FTP_ROOT}/pub/linux/apache/httpd-2.4.62.tar.gz" https://archive.apache.org/dist/httpd/httpd-2.4.62.tar.gz &
         
         # Nginx (Source)
-        if [ ! -f "${FTP_ROOT}/pub/linux/nginx/nginx-1.26.2.tar.gz" ]; then
-            curl -s -L -o "${FTP_ROOT}/pub/linux/nginx/nginx-1.26.2.tar.gz" https://nginx.org/download/nginx-1.26.2.tar.gz &
-        fi
+        curl -s -L -f -o "${FTP_ROOT}/pub/linux/nginx/nginx-1.26.2.tar.gz" https://nginx.org/download/nginx-1.26.2.tar.gz &
         
         # Tomcat (Binary)
-        if [ ! -f "${FTP_ROOT}/pub/linux/tomcat/apache-tomcat-9.0.98.tar.gz" ]; then
-            curl -s -L -o "${FTP_ROOT}/pub/linux/tomcat/apache-tomcat-9.0.98.tar.gz" https://dlcdn.apache.org/tomcat/tomcat-9/v9.0.98/bin/apache-tomcat-9.0.98.tar.gz &
-        fi
+        curl -s -L -f -o "${FTP_ROOT}/pub/linux/tomcat/apache-tomcat-9.0.98.tar.gz" https://archive.apache.org/dist/tomcat/tomcat-9/v9.0.98/bin/apache-tomcat-9.0.98.tar.gz &
         
         wait
+
         fn_ok "Descargas completadas."
     else
         fn_err "Instale curl para descargas automaticas o descargue manualmente."
