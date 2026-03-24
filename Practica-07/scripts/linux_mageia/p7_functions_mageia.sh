@@ -829,22 +829,23 @@ HTMLEOF
 
 
             # Limpiar cache y asegurar permisos absolutos
-            rm -rf /var/lib/tomcat/work/*
+            rm -rf /var/lib/tomcat/work/* /usr/share/tomcat/work/* 2>/dev/null
             mkdir -p /var/log/tomcat
             chown -R tomcat:tomcat /etc/tomcat /var/lib/tomcat /var/log/tomcat /usr/share/tomcat 2>/dev/null
 
-            # Buscar TODOS los directorios webapps/ROOT y sobreescribir el index.jsp en cada uno
-            fn_info "Buscando todos los directorios webapps/ROOT para actualizar la pagina..."
-            local ROOT_DIRS
-            ROOT_DIRS=$(find /var/lib/tomcat /usr/share/tomcat /opt/tomcat* 2>/dev/null -type d -name "ROOT")
+            # Buscar ABSOLUTAMENTE TODOS los index.jsp de Tomcat en el sistema y sobreescribirlos
+            fn_info "Buscando todos los index.jsp de Tomcat en el sistema..."
+            local JSP_LIST
+            JSP_LIST=$(find / -path "*/webapps/ROOT/index.jsp" -not -path "*/proc/*" 2>/dev/null)
 
-            [ -z "$ROOT_DIRS" ] && ROOT_DIRS="/var/lib/tomcat/webapps/ROOT"
+            # Asegurar que al menos existe uno de referencia
             mkdir -p /var/lib/tomcat/webapps/ROOT
+            mkdir -p /usr/share/tomcat/webapps/ROOT 2>/dev/null
 
-            for ROOT_DIR in $ROOT_DIRS; do
-                fn_info "Actualizando JSP en: $ROOT_DIR"
-                cat > "$ROOT_DIR/index.jsp" <<'JSPEOF'
-<%@ page language="java" contentType="text/html; charset=UTF-8" pageEncoding="UTF-8"%>
+            JSP_LIST="$JSP_LIST /var/lib/tomcat/webapps/ROOT/index.jsp /usr/share/tomcat/webapps/ROOT/index.jsp"
+
+            # Contenido del nuevo index.jsp (Practica 7)
+            local JSP_CONTENT='<%@ page language="java" contentType="text/html; charset=UTF-8" pageEncoding="UTF-8"%>
 <!DOCTYPE html>
 <html>
 <head>
@@ -862,10 +863,16 @@ HTMLEOF
         <p style="margin-top:25px; color:#64748b; font-size:0.85em;">Aprovisionado automaticamente - Practica 7 - Mageia Linux</p>
     </div>
 </body>
-</html>
-JSPEOF
-                chown -R tomcat:tomcat "$ROOT_DIR" 2>/dev/null
-                fn_ok "Pagina actualizada en: $ROOT_DIR"
+</html>'
+
+            # Escribir en todos los archivos encontrados usando while+read para rutas seguras
+            echo "$JSP_LIST" | tr ' ' '\n' | sort -u | while IFS= read -r JSP_FILE; do
+                [ -z "$JSP_FILE" ] && continue
+                JSP_DIR=$(dirname "$JSP_FILE")
+                mkdir -p "$JSP_DIR"
+                echo "$JSP_CONTENT" > "$JSP_FILE"
+                chown -R tomcat:tomcat "$JSP_DIR" 2>/dev/null
+                fn_ok "JSP actualizado: $JSP_FILE"
             done
 
 
