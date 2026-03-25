@@ -51,15 +51,22 @@ function fn_configurar_ftp_windows {
         Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.security.ssl.serverCertStoreName" -Value "My"
         Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.security.ssl.controlChannelPolicy" -Value "SslAllow"
         Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.security.ssl.dataChannelPolicy" -Value "SslAllow"
-        fn_ok "Soporte TLS/SSL habilitado en Servidor FTP."
     }
 
-    # ACL Permissions for Anonymous
+    fn_info "Configurando Autorizacion Interna para Anonymous Logon..."
+    # Configurar las Reglas de Autorizacion EN IIS (Requerido para que no rechace con 530 directory inaccessible)
+    Clear-WebConfiguration -Filter "/system.ftpServer/security/authorization" -PSPath "IIS:\Sites\Practica7_FTP"
+    Add-WebConfiguration -Filter "/system.ftpServer/security/authorization" -Value @{accessType='Allow'; roles=''; permissions='Read, Write'; users='?'} -PSPath "IIS:\Sites\Practica7_FTP"
+
+    # ACL Permissions en Carpeta Fisica para IIS y IUSR
     $acl = Get-Acl "C:\inetpub\ftproot"
-    $rule = New-Object System.Security.AccessControl.FileSystemAccessRule("IUSR", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
-    $acl.AddAccessRule($rule)
+    $rule1 = New-Object System.Security.AccessControl.FileSystemAccessRule("IUSR", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
+    $rule2 = New-Object System.Security.AccessControl.FileSystemAccessRule("IIS_IUSRS", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
+    $acl.AddAccessRule($rule1)
+    $acl.AddAccessRule($rule2)
     Set-Acl "C:\inetpub\ftproot" $acl
-    fn_ok "Estructura Base C:\inetpub\ftproot FTP Anonymous (Permisos RW) configurada."
+    
+    fn_ok "Soporte TLS/SSL y Permisos RW de Autorización FTP completados."
 
     fn_info "Descargando instaladores oficiales a las carpetas FTP desde Internet (esto puede tardar)..."
     try {
