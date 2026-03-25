@@ -1061,8 +1061,67 @@ fn_verificar_servicio_http() {
 }
 
 fn_mostrar_resumen() {
-    echo -e "\n${CYAN}=== RESUMEN MAGEIA ===${NC}"
-    echo -e "$RESUMEN_INSTALACIONES"
+    echo -e "\n${CYAN}=== ESCANEO DE SERVICIOS EN TIEMPO REAL ===${NC}"
+    echo -e "${YELLOW}Buscando servicios web activos y calculando su origen...${NC}\n"
+
+    local HAY_SERVICIOS="false"
+    local MOSTRADOS=""
+
+    while read -r line; do
+        if [ -z "$line" ]; then continue; fi
+        local PORT
+        PORT=$(echo "$line" | awk '{print $4}' | awk -F: '{print $NF}')
+        local PID
+        PID=$(echo "$line" | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2)
+        local PROCESO
+        PROCESO=$(echo "$line" | grep -o 'users:(("[^"]*"' | head -1 | cut -d'"' -f2)
+        
+        # Ignorar puertos locales de control de Tomcat (ej. 8005)
+        if [[ "$PORT" == "8005" || "$PORT" == "8009" ]]; then continue; fi
+
+        if [ -n "$PID" ]; then
+            HAY_SERVICIOS="true"
+            local EXE=""
+            local CMD=""
+            [ -e "/proc/$PID/exe" ] && EXE=$(readlink -f "/proc/$PID/exe" 2>/dev/null)
+            [ -e "/proc/$PID/cmdline" ] && CMD=$(tr '\0' ' ' < "/proc/$PID/cmdline" 2>/dev/null)
+            
+            if [[ "$PROCESO" == *"httpd"* ]] || [[ "$PROCESO" == *"apache2"* ]]; then
+                # Ocultar procesos duplicados en pantalla
+                if ! echo "$MOSTRADOS" | grep -q "APACHE_$PORT"; then
+                    if [[ "$EXE" == *"/usr/local/apache2/"* ]]; then
+                        echo -e " 🌐 [Apache]  Puerto: ${MAGENTA}${PORT}${NC} | Origen: ${MAGENTA}FTP (Privado)${NC}"
+                    else
+                        echo -e " 🌐 [Apache]  Puerto: ${GREEN}${PORT}${NC} | Origen: ${GREEN}WEB (Internet)${NC}"
+                    fi
+                    MOSTRADOS="${MOSTRADOS} APACHE_$PORT"
+                fi
+            elif [[ "$PROCESO" == *"nginx"* ]]; then
+                if ! echo "$MOSTRADOS" | grep -q "NGINX_$PORT"; then
+                    if [[ "$EXE" == *"/usr/local/nginx/"* ]]; then
+                        echo -e " 🚀 [Nginx]   Puerto: ${MAGENTA}${PORT}${NC} | Origen: ${MAGENTA}FTP (Privado)${NC}"
+                    else
+                        echo -e " 🚀 [Nginx]   Puerto: ${GREEN}${PORT}${NC} | Origen: ${GREEN}WEB (Internet)${NC}"
+                    fi
+                    MOSTRADOS="${MOSTRADOS} NGINX_$PORT"
+                fi
+            elif [[ "$PROCESO" == *"java"* ]]; then
+                if ! echo "$MOSTRADOS" | grep -q "TOMCAT_$PORT"; then
+                    if [[ "$CMD" == *"tomcat_p7"* ]]; then
+                        echo -e " ☕ [Tomcat]  Puerto: ${MAGENTA}${PORT}${NC} | Origen: ${MAGENTA}FTP (Privado)${NC}"
+                    elif [[ "$CMD" == *"tomcat"* ]] || [[ "$CMD" == *"catalina"* ]]; then
+                        echo -e " ☕ [Tomcat]  Puerto: ${GREEN}${PORT}${NC} | Origen: ${GREEN}WEB (Internet)${NC}"
+                    fi
+                    MOSTRADOS="${MOSTRADOS} TOMCAT_$PORT"
+                fi
+            fi
+        fi
+    done <<< "$(ss -tlnp 2>/dev/null | grep -E 'httpd|apache2|nginx|java' | grep LISTEN)"
+
+    if [ "$HAY_SERVICIOS" = "false" ]; then
+        echo -e " ${YELLOW}No hay ningún servicio web corriendo en este momento.${NC}"
+    fi
+    echo ""
 }
 
 # -----------------------------------------------------------------------------
