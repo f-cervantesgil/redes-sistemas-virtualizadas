@@ -26,108 +26,157 @@ function fn_show_header {
     Write-Host ""
 }
 
+
 function fn_configurar_ftp_windows {
     echo ""
     Write-Host "=== CONFIGURACION FTPS (Windows Server) ===" -ForegroundColor Cyan
     fn_info "Realizando limpieza profunda y reset de FTP..."
 
-    Install-WindowsFeature Web-FTP-Server,Web-FTP-Ext -IncludeManagementTools | Out-Null
-    Import-Module WebAdministration -ErrorAction SilentlyContinue
+    Install-WindowsFeature Web-FTP-Server,Web-FTP-Service,Web-FTP-Ext -IncludeManagementTools | Out-Null
+    Import-Module WebAdministration -ErrorAction Stop
 
-    $Root = "C:\Practica7_FTP"
-    if (-not (Test-Path $Root)) { 
-        New-Item -Path $Root -ItemType Directory -Force | Out-Null 
-    }
-    
-    $Repo = "$Root\pub\windows"
+    Add-Type -AssemblyName "Microsoft.Web.Administration"
+
+    $SiteName    = "Practica7_FTP"
+    $Root        = "C:\Practica7_FTP"
+    $AnonRoot    = Join-Path $Root "LocalUser\Public"
+    $Repo        = Join-Path $AnonRoot "pub\windows"
+    $PassiveLow  = 50000
+    $PassiveHigh = 50050
+    $appcmd      = "$env:windir\System32\inetsrv\appcmd.exe"
+
+    # === ESTRUCTURA CORRECTA PARA IIS FTP ANONIMO ===
+    # Anonymous + StartInUsersDirectory requiere: %FtpRoot%\LocalUser\Public
+    New-Item -Path $Repo -ItemType Directory -Force | Out-Null
     New-Item -Path "$Repo\iis"    -ItemType Directory -Force | Out-Null
     New-Item -Path "$Repo\apache" -ItemType Directory -Force | Out-Null
     New-Item -Path "$Repo\nginx"  -ItemType Directory -Force | Out-Null
+    Set-Content -Path (Join-Path $AnonRoot "README.txt") -Value "Repositorio FTP Practica 7" -Force
 
     # === LIMPIEZA SEGURA ===
+    Stop-WebSite -Name $SiteName -ErrorAction SilentlyContinue
+    Stop-WebSite -Name "Default FTP Site" -ErrorAction SilentlyContinue
     Stop-Service ftpsvc -Force -ErrorAction SilentlyContinue
 
-    # Eliminar sitio si existe (forma segura)
-    if (Get-WebSite -Name "Practica7_FTP" -ErrorAction SilentlyContinue) {
-        Remove-WebSite -Name "Practica7_FTP" -ErrorAction SilentlyContinue
-    }
-    Get-WebSite -Name "Default FTP Site" -ErrorAction SilentlyContinue | Stop-WebSite -ErrorAction SilentlyContinue
-
-    # Crear sitio FTP desde cero
-    New-WebFtpSite -Name "Practica7_FTP" -Port 21 -PhysicalPath $Root -Force | Out-Null
-
-    # Configuración básica
-    Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.userIsolation.mode" -Value 0
-    Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.security.authentication.anonymousAuthentication.enabled" -Value $true
-
-    # === USUARIO ANÓNIMO como IUSR (forma correcta con appcmd) ===
-    $appcmd = "$env:windir\System32\inetsrv\appcmd.exe"
     if (Test-Path $appcmd) {
-        & $appcmd set config "Practica7_FTP" `
-            -section:system.applicationHost/sites/[name='Practica7_FTP'].ftpServer/security/authentication/anonymousAuthentication `
-            /userName:"IUSR" /commit:apphost 2>$null
-        
-        fn_ok "Usuario anónimo configurado como IUSR"
+        & $appcmd delete site /site.name:"$SiteName" 2>$null | Out-Null
+        & $appcmd delete site /site.name:"Default FTP Site" 2>$null | Out-Null
     } else {
-        fn_err "No se encontró appcmd.exe"
+        try { Remove-WebSite -Name $SiteName -ErrorAction SilentlyContinue } catch {}
+        try { Remove-WebSite -Name "Default FTP Site" -ErrorAction SilentlyContinue } catch {}
     }
 
-    # === PERMISOS NTFS (la parte crítica para evitar "home directory inaccessible") ===
+    # === CREAR SITIO FTP LIMPIO ===
+    New-WebFtpSite -Name $SiteName -Port 21 -PhysicalPath $Root -Force | Out-Null
+
+    # === CONFIGURAR IIS FTP CON MWA (evita errores de secciones en appcmd) ===
+    $serverManager = New-Object Microsoft.Web.Administration.ServerManager
+    $site = $serverManager.Sites[$SiteName]
+    if (-not $site) {
+        throw "No se pudo crear el sitio FTP '$SiteName'."
+    }
+
+    $site.Applications["/"].VirtualDirectories["/"].PhysicalPath = $Root
+
+    $config = $serverManager.GetApplicationHostConfiguration()
+    $sitesSection = $config.GetSection("system.applicationHost/sites")
+    $sitesCollection = $sitesSection.GetCollection()
+
+    $siteElement = $null
+    foreach ($element in $sitesCollection) {
+        if ($element.ElementTagName -eq "site" -and $element["name"] -eq $SiteName) {
+            $siteElement = $element
+            break
+        }
+    }
+    if (-not $siteElement) {
+        throw "No se encontro la configuracion interna del sitio FTP '$SiteName'."
+    }
+
+    $ftpServerElement = $siteElement.GetChildElement("ftpServer")
+    $userIsolationElement = $ftpServerElement.GetChildElement("userIsolation")
+    $userIsolationElement["mode"] = "StartInUsersDirectory"
+
+    $securityElement = $ftpServerElement.GetChildElement("security")
+    $authenticationElement = $securityElement.GetChildElement("authentication")
+
+    $anonymousAuthenticationElement = $authenticationElement.GetChildElement("anonymousAuthentication")
+    $anonymousAuthenticationElement["enabled"] = $true
+    $anonymousAuthenticationElement["userName"] = "IUSR"
+    try { $anonymousAuthenticationElement["defaultLogonDomain"] = "NT AUTHORITY" } catch {}
+    try { $anonymousAuthenticationElement["logonMethod"] = "ClearText" } catch {}
+
+    try {
+        $basicAuthenticationElement = $authenticationElement.GetChildElement("basicAuthentication")
+        $basicAuthenticationElement["enabled"] = $false
+    } catch {}
+
+    $authorizationSection = $config.GetSection("system.ftpServer/security/authorization", $SiteName)
+    $authorizationCollection = $authorizationSection.GetCollection()
+    $authorizationCollection.Clear()
+
+    $allowAnonymous = $authorizationCollection.CreateElement("add")
+    $allowAnonymous["accessType"] = "Allow"
+    $allowAnonymous["users"] = "?"
+    $allowAnonymous["permissions"] = "Read"
+    $authorizationCollection.Add($allowAnonymous)
+
+    # Rango pasivo global para FileZilla
+    $firewallSupportSection = $config.GetSection("system.ftpServer/firewallSupport")
+    $firewallSupportSection["lowDataChannelPort"] = $PassiveLow
+    $firewallSupportSection["highDataChannelPort"] = $PassiveHigh
+
+    $serverManager.CommitChanges()
+    $serverManager.Dispose()
+
+    fn_ok "Autenticacion anonima y reglas FTP configuradas correctamente"
+
+    # === PERMISOS NTFS MINIMOS Y CORRECTOS ===
     fn_info "Aplicando permisos NTFS correctos para IUSR..."
-
-    icacls $Root /inheritance:r /T /C /Q | Out-Null
-    icacls $Root /grant "Everyone:(OI)(CI)F"        /T /C /Q | Out-Null
-    icacls $Root /grant "IUSR:(OI)(CI)F"            /T /C /Q | Out-Null
-    icacls $Root /grant "IIS_IUSRS:(OI)(CI)F"       /T /C /Q | Out-Null
-    icacls $Root /grant "ANONYMOUS LOGON:(OI)(CI)F" /T /C /Q | Out-Null
-    icacls $Root /grant "NETWORK SERVICE:(OI)(CI)F" /T /C /Q | Out-Null
-
-    # Permiso explícito FullControl
-    $acl = Get-Acl $Root
-    $rule = New-Object System.Security.AccessControl.FileSystemAccessRule("IUSR", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
-    $acl.SetAccessRule($rule)
-    Set-Acl -Path $Root -AclObject $acl
-
-    # Lo mismo para la carpeta pub
-    if (Test-Path "$Root\pub") {
-        icacls "$Root\pub" /grant "IUSR:(OI)(CI)F" /T /C /Q | Out-Null
+    foreach ($p in @($Root, (Join-Path $Root "LocalUser"), $AnonRoot, (Join-Path $AnonRoot "pub"), $Repo)) {
+        if (Test-Path $p) {
+            icacls $p /grant "IUSR:(OI)(CI)RX"      /T /C /Q | Out-Null
+            icacls $p /grant "IIS_IUSRS:(OI)(CI)RX" /T /C /Q | Out-Null
+            icacls $p /grant "Users:(OI)(CI)RX"     /T /C /Q | Out-Null
+        }
     }
 
-    # === SSL (FTPS) ===
+    # === SSL (FTPS EXPLICITO OPCIONAL) ===
     $ftpCert = New-SelfSignedCertificate -DnsName "windows.ftp.local" `
         -CertStoreLocation "cert:\LocalMachine\My" -ErrorAction SilentlyContinue
 
     if ($ftpCert) {
-        Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.security.ssl.serverCertHash"       -Value $ftpCert.GetCertHashString()
-        Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.security.ssl.serverCertStoreName"  -Value "My"
-        Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.security.ssl.controlChannelPolicy" -Value "SslAllow"
-        Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.security.ssl.dataChannelPolicy"    -Value "SslAllow"
+        Set-ItemProperty "IIS:\Sites\$SiteName" -Name "ftpServer.security.ssl.serverCertHash"       -Value $ftpCert.GetCertHashString()
+        Set-ItemProperty "IIS:\Sites\$SiteName" -Name "ftpServer.security.ssl.serverCertStoreName"  -Value "My"
+        Set-ItemProperty "IIS:\Sites\$SiteName" -Name "ftpServer.security.ssl.controlChannelPolicy" -Value "SslAllow"
+        Set-ItemProperty "IIS:\Sites\$SiteName" -Name "ftpServer.security.ssl.dataChannelPolicy"    -Value "SslAllow"
         fn_ok "Certificado SSL auto-firmado configurado (FTPS permitido)"
     } else {
-        fn_info "No se pudo crear certificado SSL → FTP en modo plano"
+        fn_info "No se pudo crear certificado SSL -> FTP seguira permitido sin requerir TLS"
     }
 
-    # === Reglas de autorización ===
-    if (Test-Path $appcmd) {
-        & $appcmd set config "Practica7_FTP" -section:system.ftpServer/security/authorization /clear /commit:apphost 2>$null
-        & $appcmd set config "Practica7_FTP" -section:system.ftpServer/security/authorization /+"[accessType='Allow',users='?',permissions='Read']" /commit:apphost 2>$null
-        & $appcmd set config "Practica7_FTP" -section:system.ftpServer/security/authorization /+"[accessType='Allow',users='*',permissions='Read,Write']" /commit:apphost 2>$null
+    # === FIREWALL ===
+    if (-not (Get-NetFirewallRule -DisplayName "Practica7 FTP Control 21" -ErrorAction SilentlyContinue)) {
+        New-NetFirewallRule -DisplayName "Practica7 FTP Control 21" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 21 | Out-Null
+    }
+    if (-not (Get-NetFirewallRule -DisplayName "Practica7 FTP Passive 50000-50050" -ErrorAction SilentlyContinue)) {
+        New-NetFirewallRule -DisplayName "Practica7 FTP Passive 50000-50050" -Direction Inbound -Action Allow -Protocol TCP -LocalPort "$PassiveLow-$PassiveHigh" | Out-Null
     }
 
-    # Iniciar servicios
+    # === INICIAR SERVICIO ===
     Start-Service ftpsvc -ErrorAction SilentlyContinue
-    Start-WebSite -Name "Practica7_FTP" -ErrorAction SilentlyContinue
+    Start-WebSite -Name $SiteName -ErrorAction SilentlyContinue
 
     fn_ok "FTP reiniciado correctamente."
 
-    # Descarga de instaladores (sin cambios importantes)
+    # === DESCARGA DE INSTALADORES AL REPOSITORIO ANONIMO ===
     fn_info "Descargando instaladores oficiales a las carpetas FTP..."
     try {
         if (-not (Test-Path "$Repo\apache\httpd.zip")) {
-            Invoke-WebRequest "https://www.apachelounge.com/download/VS17/binaries/httpd-2.4.62-win64-VS17.zip" -UserAgent $Global:USER_AGENT -OutFile "$Repo\apache\httpd.zip" -ErrorAction SilentlyContinue
+            Invoke-WebRequest "https://www.apachelounge.com/download/VS17/binaries/httpd-2.4.62-win64-VS17.zip" -UserAgent $Global:USER_AGENT -OutFile "$Repo\apache\httpd.zip" -ErrorAction Stop
         }
         if (-not (Test-Path "$Repo\nginx\nginx.zip")) {
-            Invoke-WebRequest "https://nginx.org/download/nginx-1.26.2.zip" -UserAgent $Global:USER_AGENT -OutFile "$Repo\nginx\nginx.zip" -ErrorAction SilentlyContinue
+            Invoke-WebRequest "https://nginx.org/download/nginx-1.26.2.zip" -UserAgent $Global:USER_AGENT -OutFile "$Repo\nginx\nginx.zip" -ErrorAction Stop
         }
         if (-not (Test-Path "$Repo\iis\iis_web.zip")) {
             Set-Content -Path "$env:TEMP\dummy_iis.txt" -Value "Dummy IIS"
@@ -135,8 +184,17 @@ function fn_configurar_ftp_windows {
         }
         fn_ok "Instaladores descargados correctamente."
     } catch {
-        fn_err "Error al descargar algunos archivos (verifica internet)."
+        fn_err "Error al descargar algunos archivos (verifica internet). $($_.Exception.Message)"
     }
+
+    Write-Host ""
+    Write-Host "Prueba en FileZilla con:" -ForegroundColor Cyan
+    Write-Host "  Host: <IP_DEL_SERVER>" -ForegroundColor White
+    Write-Host "  Puerto: 21" -ForegroundColor White
+    Write-Host "  Usuario: anonymous" -ForegroundColor White
+    Write-Host "  Contrasena: cualquier correo o texto" -ForegroundColor White
+    Write-Host "  Cifrado: FTP explicito sobre TLS si esta disponible" -ForegroundColor White
+    Write-Host "  Ruta esperada: /pub/windows/" -ForegroundColor White
 
     Read-Host "Presiona ENTER para continuar"
 }
