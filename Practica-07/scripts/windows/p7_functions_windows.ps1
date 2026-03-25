@@ -32,7 +32,7 @@ function fn_configurar_ftp_windows {
     fn_info "Realizando limpieza profunda y reset de FTP..."
 
     Install-WindowsFeature Web-FTP-Server,Web-FTP-Ext -IncludeManagementTools | Out-Null
-    Import-Module WebAdministration 
+    Import-Module WebAdministration -ErrorAction SilentlyContinue
 
     $Root = "C:\Practica7_FTP"
     if (-not (Test-Path $Root)) { 
@@ -40,85 +40,94 @@ function fn_configurar_ftp_windows {
     }
     
     $Repo = "$Root\pub\windows"
-    New-Item -Path "$Repo\iis" -ItemType Directory -Force | Out-Null
+    New-Item -Path "$Repo\iis"    -ItemType Directory -Force | Out-Null
     New-Item -Path "$Repo\apache" -ItemType Directory -Force | Out-Null
-    New-Item -Path "$Repo\nginx" -ItemType Directory -Force | Out-Null
+    New-Item -Path "$Repo\nginx"  -ItemType Directory -Force | Out-Null
 
-    # Reset total
+    # === LIMPIEZA SEGURA ===
     Stop-Service ftpsvc -Force -ErrorAction SilentlyContinue
-    Get-WebSite -Name "Practica7_FTP" -ErrorAction SilentlyContinue | Remove-WebSite -ErrorAction SilentlyContinue
 
-    # Crear sitio FTP limpio
-    New-WebFtpSite -Name "Practica7_FTP" -Port 21 -PhysicalPath $Root -Force
+    # Eliminar sitio si existe (forma segura)
+    if (Get-WebSite -Name "Practica7_FTP" -ErrorAction SilentlyContinue) {
+        Remove-WebSite -Name "Practica7_FTP" -ErrorAction SilentlyContinue
+    }
+    Get-WebSite -Name "Default FTP Site" -ErrorAction SilentlyContinue | Stop-WebSite -ErrorAction SilentlyContinue
+
+    # Crear sitio FTP desde cero
+    New-WebFtpSite -Name "Practica7_FTP" -Port 21 -PhysicalPath $Root -Force | Out-Null
 
     # Configuración básica
     Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.userIsolation.mode" -Value 0
     Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.security.authentication.anonymousAuthentication.enabled" -Value $true
 
-    # Forzar usuario anónimo como IUSR
-    $appcmd = 'C:\Windows\System32\inetsrv\appcmd.exe'
+    # === USUARIO ANÓNIMO como IUSR (forma correcta con appcmd) ===
+    $appcmd = "$env:windir\System32\inetsrv\appcmd.exe"
     if (Test-Path $appcmd) {
-        & $appcmd set config "Practica7_FTP" -section:system.ftpServer/security/authentication/anonymousAuthentication /userName:"IUSR" /commit:apphost
+        & $appcmd set config "Practica7_FTP" `
+            -section:system.applicationHost/sites/[name='Practica7_FTP'].ftpServer/security/authentication/anonymousAuthentication `
+            /userName:"IUSR" /commit:apphost 2>$null
+        
         fn_ok "Usuario anónimo configurado como IUSR"
+    } else {
+        fn_err "No se encontró appcmd.exe"
     }
 
-    # === PERMISOS NTFS CORREGIDOS (esta es la parte más importante) ===
+    # === PERMISOS NTFS (la parte crítica para evitar "home directory inaccessible") ===
     fn_info "Aplicando permisos NTFS correctos para IUSR..."
 
-    # Quitar permisos heredados y limpiar reglas previas
-    icacls $Root /inheritance:r /T /C /Q
+    icacls $Root /inheritance:r /T /C /Q | Out-Null
+    icacls $Root /grant "Everyone:(OI)(CI)F"        /T /C /Q | Out-Null
+    icacls $Root /grant "IUSR:(OI)(CI)F"            /T /C /Q | Out-Null
+    icacls $Root /grant "IIS_IUSRS:(OI)(CI)F"       /T /C /Q | Out-Null
+    icacls $Root /grant "ANONYMOUS LOGON:(OI)(CI)F" /T /C /Q | Out-Null
+    icacls $Root /grant "NETWORK SERVICE:(OI)(CI)F" /T /C /Q | Out-Null
 
-    # Dar permisos completos a las cuentas necesarias
-    icacls $Root /grant "Everyone:(OI)(CI)F" /T /C /Q
-    icacls $Root /grant "IUSR:(OI)(CI)F" /T /C /Q
-    icacls $Root /grant "IIS_IUSRS:(OI)(CI)F" /T /C /Q
-    icacls $Root /grant "ANONYMOUS LOGON:(OI)(CI)F" /T /C /Q
-    icacls $Root /grant "NETWORK SERVICE:(OI)(CI)F" /T /C /Q
-
-    # Permiso explícito de lectura + ejecución en la raíz (muy importante)
+    # Permiso explícito FullControl
     $acl = Get-Acl $Root
     $rule = New-Object System.Security.AccessControl.FileSystemAccessRule("IUSR", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
     $acl.SetAccessRule($rule)
     Set-Acl -Path $Root -AclObject $acl
 
-    # Lo mismo para la subcarpeta pub (por si acaso)
+    # Lo mismo para la carpeta pub
     if (Test-Path "$Root\pub") {
-        icacls "$Root\pub" /grant "IUSR:(OI)(CI)F" /T /C /Q
+        icacls "$Root\pub" /grant "IUSR:(OI)(CI)F" /T /C /Q | Out-Null
     }
 
-    # === SSL (opcional pero recomendado) ===
-    $ftpCert = New-SelfSignedCertificate -DnsName "windows.ftp.local" -CertStoreLocation "cert:\LocalMachine\My" -ErrorAction SilentlyContinue
+    # === SSL (FTPS) ===
+    $ftpCert = New-SelfSignedCertificate -DnsName "windows.ftp.local" `
+        -CertStoreLocation "cert:\LocalMachine\My" -ErrorAction SilentlyContinue
+
     if ($ftpCert) {
-        Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.security.ssl.serverCertHash" -Value $ftpCert.GetCertHashString()
-        Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.security.ssl.serverCertStoreName" -Value "My"
+        Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.security.ssl.serverCertHash"       -Value $ftpCert.GetCertHashString()
+        Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.security.ssl.serverCertStoreName"  -Value "My"
         Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.security.ssl.controlChannelPolicy" -Value "SslAllow"
-        Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.security.ssl.dataChannelPolicy" -Value "SslAllow"
-        fn_ok "Certificado SSL auto-firmado configurado (FTPS con TLS explícito o implícito)"
+        Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.security.ssl.dataChannelPolicy"    -Value "SslAllow"
+        fn_ok "Certificado SSL auto-firmado configurado (FTPS permitido)"
     } else {
-        fn_info "No se pudo crear certificado SSL. FTP quedará en modo plano."
+        fn_info "No se pudo crear certificado SSL → FTP en modo plano"
     }
 
-    # Reglas de autorización (anónimo lectura + autenticado escritura)
+    # === Reglas de autorización ===
     if (Test-Path $appcmd) {
-        & $appcmd set config "Practica7_FTP" -section:system.ftpServer/security/authorization /clear /commit:apphost
-        & $appcmd set config "Practica7_FTP" -section:system.ftpServer/security/authorization /+"[accessType='Allow',users='?',permissions='Read']" /commit:apphost
-        & $appcmd set config "Practica7_FTP" -section:system.ftpServer/security/authorization /+"[accessType='Allow',users='*',permissions='Read,Write']" /commit:apphost
+        & $appcmd set config "Practica7_FTP" -section:system.ftpServer/security/authorization /clear /commit:apphost 2>$null
+        & $appcmd set config "Practica7_FTP" -section:system.ftpServer/security/authorization /+"[accessType='Allow',users='?',permissions='Read']" /commit:apphost 2>$null
+        & $appcmd set config "Practica7_FTP" -section:system.ftpServer/security/authorization /+"[accessType='Allow',users='*',permissions='Read,Write']" /commit:apphost 2>$null
     }
 
     # Iniciar servicios
-    Start-Service ftpsvc
+    Start-Service ftpsvc -ErrorAction SilentlyContinue
     Start-WebSite -Name "Practica7_FTP" -ErrorAction SilentlyContinue
 
     fn_ok "FTP reiniciado correctamente."
 
-    # Descarga de instaladores (se mantiene igual)
+    # Descarga de instaladores (sin cambios importantes)
     fn_info "Descargando instaladores oficiales a las carpetas FTP..."
     try {
         if (-not (Test-Path "$Repo\apache\httpd.zip")) {
-            Invoke-WebRequest "https://www.apachelounge.com/download/VS17/binaries/httpd-2.4.62-win64-VS17.zip" -UserAgent $Global:USER_AGENT -OutFile "$Repo\apache\httpd.zip"
+            Invoke-WebRequest "https://www.apachelounge.com/download/VS17/binaries/httpd-2.4.62-win64-VS17.zip" -UserAgent $Global:USER_AGENT -OutFile "$Repo\apache\httpd.zip" -ErrorAction SilentlyContinue
         }
         if (-not (Test-Path "$Repo\nginx\nginx.zip")) {
-            Invoke-WebRequest "https://nginx.org/download/nginx-1.26.2.zip" -UserAgent $Global:USER_AGENT -OutFile "$Repo\nginx\nginx.zip"
+            Invoke-WebRequest "https://nginx.org/download/nginx-1.26.2.zip" -UserAgent $Global:USER_AGENT -OutFile "$Repo\nginx\nginx.zip" -ErrorAction SilentlyContinue
         }
         if (-not (Test-Path "$Repo\iis\iis_web.zip")) {
             Set-Content -Path "$env:TEMP\dummy_iis.txt" -Value "Dummy IIS"
@@ -126,7 +135,7 @@ function fn_configurar_ftp_windows {
         }
         fn_ok "Instaladores descargados correctamente."
     } catch {
-        fn_err "Error al descargar algunos archivos. Verifica tu conexión."
+        fn_err "Error al descargar algunos archivos (verifica internet)."
     }
 
     Read-Host "Presiona ENTER para continuar"
