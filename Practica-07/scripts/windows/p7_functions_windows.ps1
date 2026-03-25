@@ -29,7 +29,7 @@ function fn_show_header {
 function fn_configurar_ftp_windows {
     echo ""
     Write-Host "=== CONFIGURACION FTPS (Windows Server) ===" -ForegroundColor Cyan
-    fn_info "Activando rol de FTP Server en IIS..."
+    fn_info "Preparando Servicios de IIS y FTP..."
     Install-WindowsFeature Web-FTP-Server,Web-FTP-Ext -IncludeManagementTools | Out-Null
     Import-Module WebAdministration 
 
@@ -41,26 +41,25 @@ function fn_configurar_ftp_windows {
     New-Item -Path "$Repo\apache" -ItemType Directory -Force | Out-Null
     New-Item -Path "$Repo\nginx" -ItemType Directory -Force | Out-Null
 
-    # Detener sitios que puedan chocar en puerto 21
+    # Detener servicios conflictivos
+    Stop-Service ftpsvc -Force -ErrorAction SilentlyContinue
     Get-WebSite -Name "Default FTP Site" -ErrorAction SilentlyContinue | Stop-WebSite
 
-    # Recrear el sitio desde cero para asegurar limpieza total
+    # Borrado LIMPIO del sitio anterior (usando appcmd para evitar "Class not registered")
+    $appcmd = "$env:systemroot\system32\inetsrv\appcmd.exe"
     if (Get-WebSite -Name "Practica7_FTP" -ErrorAction SilentlyContinue) {
-        try {
-            Remove-WebSite -Name "Practica7_FTP" -Confirm:$false -ErrorAction Stop
-        } catch {
-            $appCmdExe = "$env:systemroot\system32\inetsrv\appcmd.exe"
-            if (Test-Path $appCmdExe) { & $appCmdExe delete site "Practica7_FTP" 2>$null }
-        }
+        if (Test-Path $appcmd) { & $appcmd delete site "Practica7_FTP" /commit:apphost 2>$null }
     }
+
+    # Creacion del sitio
     New-WebFtpSite -Name "Practica7_FTP" -Port 21 -PhysicalPath $Root -Force
     
-    # Configuracion de Anonimos e Identidad
+    # Configuracion de Anonimos y Aislamiento
     Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.security.authentication.anonymousAuthentication.enabled" -Value $true
+    Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.security.authentication.anonymousAuthentication.userName" -Value "IUSR"
     Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.userIsolation.mode" -Value "None"
 
-    # Generar e inyectar Certificado SSL para el servicio FTP (FTPS)
-    fn_info "Generando y enlazando certificado SSL para FTP (FTPS)..."
+    # SSL para FTPS (Opcional pero habilitado)
     $ftpCert = New-SelfSignedCertificate -DnsName "windows.ftp.local" -CertStoreLocation "cert:\LocalMachine\My" -ErrorAction SilentlyContinue
     if ($ftpCert) {
         Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.security.ssl.serverCertHash" -Value $ftpCert.GetCertHashString()
@@ -69,40 +68,22 @@ function fn_configurar_ftp_windows {
         Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.security.ssl.dataChannelPolicy" -Value "SslAllow"
     }
 
-    fn_info "Configurando Autorizacion y Permisos NTFS (Fuerza Bruta)..."
-    
-    # Usar cmdlets de PowerShell para Autorizacion FTP (mas fiable que appcmd en este contexto)
-    # Limpiar reglas existentes para evitar duplicados o conflictos
-    try {
-        Clear-WebConfiguration -Filter /system.ftpServer/security/authorization -Location "Practica7_FTP" -ErrorAction SilentlyContinue
-        
-        # Agregar regla de permiso total para Anonimos (?) y Todos (*)
-        Add-WebConfiguration -Filter /system.ftpServer/security/authorization -Location "Practica7_FTP" -Value @{accessType="Allow";users="?";permissions="Read,Write"}
-        Add-WebConfiguration -Filter /system.ftpServer/security/authorization -Location "Practica7_FTP" -Value @{accessType="Allow";users="*";permissions="Read,Write"}
-        fn_ok "Reglas de autorizacion FTP aplicadas."
-    } catch {
-        fn_err "Error al configurar reglas de autorizacion FTP."
+    fn_info "Forzando Autorización y Permisos NTFS..."
+    # Reglas de autorizacion por CMD para maxima compatibilidad
+    if (Test-Path $appcmd) {
+        & $appcmd set config "Practica7_FTP" -section:system.ftpServer/security/authorization /+"[accessType='Allow',users='*',permissions='Read,Write']" /commit:apphost 2>$null
     }
 
-    # ACL Permissions usando icacls (bypass radical de errores de ACL de PowerShell y permisos IUSR)
-    # Asegurar que el contenedor y los archivos hereden permisos
-    icacls "$Root" /grant "IUSR:(OI)(CI)F" /T /C /Q
-    icacls "$Root" /grant "IIS_IUSRS:(OI)(CI)F" /T /C /Q
+    # ACL Permissions TOTALES
     icacls "$Root" /grant "Everyone:(OI)(CI)F" /T /C /Q
+    icacls "$Root" /grant "IUSR:(OI)(CI)F" /T /C /Q
+    icacls "$Root" /grant "NETWORK SERVICE:(OI)(CI)F" /T /C /Q
     
-    # Reiniciar servicio para aplicar cambios de configuracion pesados
-    fn_info "Reiniciando servicios de FTP..."
-    Stop-Service ftpsvc -Force -ErrorAction SilentlyContinue
-    Start-Sleep 2
+    # Reinicio y arranque
     Start-Service ftpsvc
+    Start-WebSite -Name "Practica7_FTP" -ErrorAction SilentlyContinue
     
-    # Asegurar que el sitio este iniciado
-    $siteObj = Get-WebSite -Name "Practica7_FTP"
-    if ($siteObj.State -ne "Started") {
-        Start-WebSite -Name "Practica7_FTP"
-    }
-    
-    fn_ok "Soporte TLS/SSL y Permisos de Acceso FTP completados."
+    fn_ok "Configuracion FTPS completada. Intenta conectar ahora."
 
     fn_info "Descargando instaladores oficiales a las carpetas FTP desde Internet (esto puede tardar)..."
     try {
