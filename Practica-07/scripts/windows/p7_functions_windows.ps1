@@ -46,7 +46,12 @@ function fn_configurar_ftp_windows {
 
     # Recrear el sitio desde cero para asegurar limpieza total
     if (Get-WebSite -Name "Practica7_FTP" -ErrorAction SilentlyContinue) {
-        Remove-WebSite -Name "Practica7_FTP" -Confirm:$false
+        try {
+            Remove-WebSite -Name "Practica7_FTP" -Confirm:$false -ErrorAction Stop
+        } catch {
+            $appCmdExe = "$env:systemroot\system32\inetsrv\appcmd.exe"
+            if (Test-Path $appCmdExe) { & $appCmdExe delete site "Practica7_FTP" 2>$null }
+        }
     }
     New-WebFtpSite -Name "Practica7_FTP" -Port 21 -PhysicalPath $Root -Force
     
