@@ -43,6 +43,17 @@ function fn_configurar_ftp_windows {
         Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.security.authentication.anonymousAuthentication.enabled" -Value $true
     }
 
+    # Generar e inyectar Certificado SSL para el servicio FTP (FTPS) siempre
+    fn_info "Generando y enlazando certificado SSL para FTP (FTPS)..."
+    $ftpCert = New-SelfSignedCertificate -DnsName "windows.ftp.local" -CertStoreLocation "cert:\LocalMachine\My" -ErrorAction SilentlyContinue
+    if ($ftpCert) {
+        Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.security.ssl.serverCertHash" -Value $ftpCert.GetCertHashString()
+        Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.security.ssl.serverCertStoreName" -Value "My"
+        Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.security.ssl.controlChannelPolicy" -Value "SslAllow"
+        Set-ItemProperty "IIS:\Sites\Practica7_FTP" -Name "ftpServer.security.ssl.dataChannelPolicy" -Value "SslAllow"
+        fn_ok "Soporte TLS/SSL habilitado en Servidor FTP."
+    }
+
     # ACL Permissions for Anonymous
     $acl = Get-Acl "C:\inetpub\ftproot"
     $rule = New-Object System.Security.AccessControl.FileSystemAccessRule("IUSR", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
