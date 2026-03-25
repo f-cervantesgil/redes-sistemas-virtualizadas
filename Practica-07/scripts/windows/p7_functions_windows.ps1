@@ -54,9 +54,11 @@ function fn_configurar_ftp_windows {
     }
 
     fn_info "Configurando Autorizacion Interna para Anonymous Logon..."
-    # Configurar las Reglas de Autorizacion EN IIS (Requerido para que no rechace con 530 directory inaccessible)
-    Clear-WebConfiguration -Filter "/system.ftpServer/security/authorization" -PSPath "IIS:\Sites\Practica7_FTP"
-    Add-WebConfiguration -Filter "/system.ftpServer/security/authorization" -Value @{accessType='Allow'; roles=''; permissions='Read, Write'; users='?'} -PSPath "IIS:\Sites\Practica7_FTP"
+    # Configurar las Reglas de Autorizacion usando appcmd (Evita fallos de dependencias COM en versiones antiguas)
+    $appcmd = "$env:systemroot\system32\inetsrv\appcmd.exe"
+    if (Test-Path $appcmd) {
+        & $appcmd set config "Practica7_FTP" -section:system.ftpServer/security/authorization /+"[accessType='Allow',users='?',permissions='Read,Write']" /commit:apphost 2>$null
+    }
 
     # ACL Permissions en Carpeta Fisica para IIS y IUSR
     $acl = Get-Acl "C:\inetpub\ftproot"
@@ -66,7 +68,7 @@ function fn_configurar_ftp_windows {
     $acl.AddAccessRule($rule2)
     Set-Acl "C:\inetpub\ftproot" $acl
     
-    fn_ok "Soporte TLS/SSL y Permisos RW de Autorización FTP completados."
+    fn_ok "Soporte TLS/SSL y Permisos RW de Autorizacion FTP completados."
 
     fn_info "Descargando instaladores oficiales a las carpetas FTP desde Internet (esto puede tardar)..."
     try {
@@ -85,7 +87,7 @@ function fn_configurar_ftp_windows {
         }
         fn_ok "Instaladores web guardados en el Repositorio FTP exitosamente."
     } catch {
-        fn_err "Error descargando binarios. Verifica conexión a Internet."
+        fn_err "Error descargando binarios. Verifica conexion a Internet."
     }
     Read-Host "Presiona ENTER para continuar"
 }
@@ -107,7 +109,7 @@ function fn_generar_certificado_ssl {
     Write-Host ">> Generando certificado PEM (cert y key) para $NombreApp..." -ForegroundColor Magenta
     try {
         if (Test-Path "C:\ssl\openssl.exe") {
-            # Se usa una configuración por defecto silenciosa
+            # Se usa una configuracion por defecto silenciosa
             $config = "[req]`ndistinguished_name=req_distinguished_name`nprompt=no`n[req_distinguished_name]`nC=MX`nCN=$script:DOMINIO"
             Set-Content -Path "C:\ssl\openssl.cnf" -Value $config
             $p = Start-Process -FilePath "C:\ssl\openssl.exe" -ArgumentList "req -x509 -nodes -days 365 -newkey rsa:2048 -keyout `"$SSL_DIR\server.key`" -out `"$SSL_DIR\server.crt`" -config `"C:\ssl\openssl.cnf`"" -NoNewWindow -PassThru -Wait
