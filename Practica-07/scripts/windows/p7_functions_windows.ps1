@@ -1,6 +1,10 @@
 # p7_functions_windows.ps1
 # Funciones auxiliares para Menu Windows - Practica 7
 
+# Forzar el uso de TLS 1.2 para evitar rechazos en servidores HTTPS modernos (GitHub, Nginx, etc)
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+$Global:USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
+
 function fn_info { Write-Host "[INFO] $($args)" -ForegroundColor Yellow }
 function fn_ok { Write-Host "[OK] $($args)" -ForegroundColor Green }
 function fn_err { Write-Host "[ERROR] $($args)" -ForegroundColor Red }
@@ -46,15 +50,15 @@ function fn_configurar_ftp_windows {
     Set-Acl "C:\inetpub\ftproot" $acl
     fn_ok "Estructura Base C:\inetpub\ftproot FTP Anonymous (Permisos RW) configurada."
 
-    fn_info "Descargando instaladores oficales a las carpetas FTP desde Internet (esto puede tardar)..."
+    fn_info "Descargando instaladores oficiales a las carpetas FTP desde Internet (esto puede tardar)..."
     try {
         if (-not (Test-Path "$Root\apache\httpd.zip")) {
             Write-Host ">> Descargando Apache HTTPD Windows (10MB)..." -ForegroundColor Yellow
-            Invoke-WebRequest "https://github.com/nono303/win-builds/releases/download/v2.4.62/httpd-2.4.62-win64-VS17.zip" -OutFile "$Root\apache\httpd.zip"
+            Invoke-WebRequest "https://www.apachelounge.com/download/VS17/binaries/httpd-2.4.62-win64-VS17.zip" -UserAgent $Global:USER_AGENT -OutFile "$Root\apache\httpd.zip"
         }
         if (-not (Test-Path "$Root\nginx\nginx.zip")) {
             Write-Host ">> Descargando Nginx Windows (1.5MB)..." -ForegroundColor Yellow
-            Invoke-WebRequest "https://nginx.org/download/nginx-1.26.2.zip" -OutFile "$Root\nginx\nginx.zip"
+            Invoke-WebRequest "https://nginx.org/download/nginx-1.26.2.zip" -UserAgent $Global:USER_AGENT -OutFile "$Root\nginx\nginx.zip"
         }
         if (-not (Test-Path "$Root\iis\iis_web.zip")) {
             Write-Host ">> Descargando IIS Pack (Mock)..." -ForegroundColor Yellow
@@ -75,7 +79,7 @@ function fn_generar_certificado_ssl {
 
     if (-not (Test-Path "C:\ssl\openssl.exe")) {
         Write-Host "Preparando instalacion de OpenSSL dinamica..." -ForegroundColor Yellow
-        Invoke-WebRequest "https://github.com/nono303/win-builds/releases/download/v2.4.62/httpd-2.4.62-win64-VS17.zip" -OutFile "$env:TEMP\tmp_ap.zip" -ErrorAction SilentlyContinue
+        Invoke-WebRequest "https://www.apachelounge.com/download/VS17/binaries/httpd-2.4.62-win64-VS17.zip" -UserAgent $Global:USER_AGENT -OutFile "$env:TEMP\tmp_ap.zip" -ErrorAction SilentlyContinue
         Expand-Archive "$env:TEMP\tmp_ap.zip" -DestinationPath "$env:TEMP\tmp_ap" -Force -ErrorAction SilentlyContinue
         Copy-Item "$env:TEMP\tmp_ap\Apache24\bin\openssl.exe" -Destination "C:\ssl\" -ErrorAction SilentlyContinue
         Copy-Item "$env:TEMP\tmp_ap\Apache24\bin\libcrypto*.dll" -Destination "C:\ssl\" -ErrorAction SilentlyContinue
@@ -177,7 +181,7 @@ function fn_apache_install {
         try { Invoke-WebRequest "ftp://localhost/pub/windows/apache/httpd.zip" -OutFile $destZip } catch { fn_err "No hay Apache en FTP." }
     } else {
         fn_info "Descargando desde WEB internet..."
-        Invoke-WebRequest "https://github.com/nono303/win-builds/releases/download/v2.4.62/httpd-2.4.62-win64-VS17.zip" -OutFile $destZip
+        Invoke-WebRequest "https://www.apachelounge.com/download/VS17/binaries/httpd-2.4.62-win64-VS17.zip" -UserAgent $Global:USER_AGENT -OutFile $destZip
     }
 
     fn_info "Descomprimiendo Apache en C:\Apache24..."
@@ -336,18 +340,20 @@ function fn_mostrar_resumen {
         }
     }
     
-    # Revisar bindings explicitos de IIS
-    Import-Module WebAdministration
-    $iisBindings = Get-WebBinding -Name "Default Web Site" -ErrorAction SilentlyContinue
-    if ($iisBindings) {
-        $found = $true
-        foreach ($b in $iisBindings) {
-            $puertoIIS = ($b.bindingInformation -split ':')[1]
-            $html = Get-Content "C:\inetpub\wwwroot\index.html" -ErrorAction SilentlyContinue
-            if ($html -match "desde ftp") {
-                Write-Host " 💠 [IIS]    Puerto: $puertoIIS | Origen: FTP (Privado)" -ForegroundColor Magenta
-            } else {
-                Write-Host " 💠 [IIS]    Puerto: $puertoIIS | Origen: WEB (Internet)" -ForegroundColor Green
+    # Revisar bindings explicitos de IIS si esta instalado
+    if (Get-Module -ListAvailable WebAdministration) {
+        Import-Module WebAdministration -ErrorAction SilentlyContinue
+        $iisBindings = Get-WebBinding -Name "Default Web Site" -ErrorAction SilentlyContinue
+        if ($iisBindings) {
+            $found = $true
+            foreach ($b in $iisBindings) {
+                $puertoIIS = ($b.bindingInformation -split ':')[1]
+                $html = Get-Content "C:\inetpub\wwwroot\index.html" -ErrorAction SilentlyContinue
+                if ($html -match "desde ftp") {
+                    Write-Host " 💠 [IIS]    Puerto: $puertoIIS | Origen: FTP (Privado)" -ForegroundColor Magenta
+                } else {
+                    Write-Host " 💠 [IIS]    Puerto: $puertoIIS | Origen: WEB (Internet)" -ForegroundColor Green
+                }
             }
         }
     }
