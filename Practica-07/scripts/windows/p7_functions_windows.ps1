@@ -157,30 +157,50 @@ function fn_configurar_ftp_windows {
 
 function fn_generar_certificado_ssl {
     param($NombreApp)
+
     $SSL_DIR = "C:\ssl\$NombreApp"
     New-Item -Path $SSL_DIR -ItemType Directory -Force | Out-Null
 
-    if (-not (Test-Path "C:\ssl\openssl.exe")) {
-        Write-Host "Preparando instalacion de OpenSSL dinamica..." -ForegroundColor Yellow
-        Invoke-WebRequest "https://www.apachelounge.com/download/VS17/binaries/httpd-2.4.62-win64-VS17.zip" -UserAgent $Global:USER_AGENT -OutFile "$env:TEMP\tmp_ap.zip" -ErrorAction SilentlyContinue
-        Expand-Archive "$env:TEMP\tmp_ap.zip" -DestinationPath "$env:TEMP\tmp_ap" -Force -ErrorAction SilentlyContinue
-        Copy-Item "$env:TEMP\tmp_ap\Apache24\bin\openssl.exe" -Destination "C:\ssl\" -ErrorAction SilentlyContinue
-        Copy-Item "$env:TEMP\tmp_ap\Apache24\bin\libcrypto*.dll" -Destination "C:\ssl\" -ErrorAction SilentlyContinue
-        Copy-Item "$env:TEMP\tmp_ap\Apache24\bin\libssl*.dll" -Destination "C:\ssl\" -ErrorAction SilentlyContinue
+    $openssl = $null
+    $candidatos = @(
+        "C:\Apache24\bin\openssl.exe",
+        "C:\ssl\openssl.exe",
+        "$env:TEMP\tmp_ap\Apache24\bin\openssl.exe"
+    )
+
+    foreach ($c in $candidatos) {
+        if (Test-Path $c) {
+            $openssl = $c
+            break
+        }
+    }
+
+    if (-not $openssl) {
+        fn_err "No se encontro openssl.exe para generar el certificado."
+        return $false
     }
 
     Write-Host ">> Generando certificado PEM (cert y key) para $NombreApp..." -ForegroundColor Magenta
+
     try {
-        if (Test-Path "C:\ssl\openssl.exe") {
-            # Se usa una configuracion por defecto silenciosa
-            $config = "[req]`ndistinguished_name=req_distinguished_name`nprompt=no`n[req_distinguished_name]`nC=MX`nCN=$script:DOMINIO"
-            Set-Content -Path "C:\ssl\openssl.cnf" -Value $config
-            $p = Start-Process -FilePath "C:\ssl\openssl.exe" -ArgumentList "req -x509 -nodes -days 365 -newkey rsa:2048 -keyout `"$SSL_DIR\server.key`" -out `"$SSL_DIR\server.crt`" -config `"C:\ssl\openssl.cnf`"" -NoNewWindow -PassThru -Wait
+        & $openssl req -x509 -nodes -newkey rsa:2048 `
+            -keyout "$SSL_DIR\server.key" `
+            -out "$SSL_DIR\server.crt" `
+            -days 365 `
+            -subj "/C=MX/ST=Sonora/L=Obregon/O=Practica07/OU=Redes/CN=$script:DOMINIO" | Out-Null
+
+        if ((Test-Path "$SSL_DIR\server.crt") -and (Test-Path "$SSL_DIR\server.key")) {
             fn_ok "Certificado PEM OK!"
+            return $true
         } else {
-            fn_err "OpenSSL fallo en extraerse. SSL no se completara."
+            fn_err "No se generaron server.crt y server.key."
+            return $false
         }
-    } catch { fn_err "Fallo la creacion ssl" }
+    }
+    catch {
+        fn_err "Fallo la creacion SSL: $($_.Exception.Message)"
+        return $false
+    }
 }
 
 function fn_instalar_servicio_hibrido {
