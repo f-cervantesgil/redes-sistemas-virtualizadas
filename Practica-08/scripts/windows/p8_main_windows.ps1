@@ -25,16 +25,18 @@ while ($true) {
     
     switch ($op) {
         "1" { fn_install_features }
-        "2" { fn_setup_ad_structure }
-        "3" { fn_import_users_csv "$ScriptDir\..\..\data\usuarios.csv" }
-        "4" { fn_setup_logon_gpo }
+        "2" { if (fn_check_dc) { fn_setup_ad_structure } }
+        "3" { if (fn_check_dc) { fn_import_users_csv "$ScriptDir\..\..\data\usuarios.csv" } }
+        "4" { if (fn_check_dc) { fn_setup_logon_gpo } }
         "5" { fn_setup_fsrm }
         "6" { fn_setup_applocker }
         "7" { 
             fn_install_features
-            fn_setup_ad_structure
-            fn_import_users_csv "$ScriptDir\..\..\data\usuarios.csv"
-            fn_setup_logon_gpo
+            if (fn_check_dc) {
+                fn_setup_ad_structure
+                fn_import_users_csv "$ScriptDir\..\..\data\usuarios.csv"
+                fn_setup_logon_gpo
+            }
             fn_setup_fsrm
             fn_setup_applocker
             fn_ok "Proceso completo finalizado."

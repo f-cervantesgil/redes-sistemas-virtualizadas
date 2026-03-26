@@ -14,8 +14,9 @@ function fn_check_admin {
 }
 
 function fn_install_features {
-    fn_info "Instalando caracteristicas necesarias (AD, FSRM, AppLocker)..."
-    $features = @("RSAT-AD-PowerShell", "FS-Resource-Manager", "RSAT-AppLocker", "GPMC")
+    fn_info "Instalando caracteristicas necesarias (AD, FSRM, GPO)..."
+    # Nombres corregidos para Windows Server 2022
+    $features = @("AD-Domain-Services", "RSAT-AD-PowerShell", "FS-Resource-Manager", "GPMC")
     foreach ($f in $features) {
         if (-not (Get-WindowsFeature $f -ErrorAction SilentlyContinue).Installed) {
             fn_info "Instalando $f..."
@@ -23,6 +24,20 @@ function fn_install_features {
         }
     }
     fn_ok "Caracteristicas listas."
+}
+
+function fn_check_dc {
+    if ((Get-WindowsFeature AD-Domain-Services).InstallState -ne "Installed") {
+        fn_err "El rol de Active Directory no esta instalado. Por favor, instala AD DS y promueve el servidor a DC primero."
+        return $false
+    }
+    try {
+        $dom = Get-ADDomain -ErrorAction Stop
+        return $true
+    } catch {
+        fn_err "No se pudo detectar un dominio activo. ¿Ya promoviste este servidor a Controlador de Dominio (DC)?"
+        return $false
+    }
 }
 
 function fn_setup_ad_structure {
@@ -141,7 +156,12 @@ function fn_setup_logon_gpo {
 
 function fn_setup_fsrm {
     fn_info "Configurando FSRM (Cuotas y Filtros)..."
-    Import-Module FSRM
+    try {
+        Import-Module FileServerResourceManager -ErrorAction Stop
+    } catch {
+        fn_err "No se pudo cargar el modulo FileServerResourceManager. Asegurate de que la caracteristica FS-Resource-Manager este instalada."
+        return
+    }
 
     # 1. Cuotas (Hard Quotas)
     # 5 MB para No Cuates, 10 MB para Cuates
@@ -172,8 +192,12 @@ function fn_setup_fsrm {
 function fn_setup_applocker {
     fn_info "Configurando AppLocker (Reglas de Hash)..."
     # El servicio Application Identity (AppIDSvc) debe estar corriendo
-    Set-Service AppIDSvc -StartupType Automatic
-    Start-Service AppIDSvc -ErrorAction SilentlyContinue
+    try {
+        Set-Service AppIDSvc -StartupType Automatic -ErrorAction SilentlyContinue
+        Start-Service AppIDSvc -ErrorAction SilentlyContinue
+    } catch {
+        fn_info "Nota: Fallo la configuracion automatica del servicio AppIDSvc (Suele requerir reinicio tras instalar GPMC)."
+    }
 
     # Generar regla de Hash para el Bloc de Notas
     $notepadPath = "$env:windir\system32\notepad.exe"
