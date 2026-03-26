@@ -254,44 +254,121 @@ function fn_iis_install {
 
 function fn_apache_install {
     param($Origen, $Puerto, $SSL)
+
     fn_info "Limpiando servicios previos de Apache..."
     Stop-Service Apache24 -Force -ErrorAction SilentlyContinue
     Get-Process httpd -ErrorAction SilentlyContinue | Stop-Process -Force
+    sc.exe delete Apache24 2>$null | Out-Null
 
     $destZip = "$env:TEMP\apache.zip"
+    Remove-Item $destZip -Force -ErrorAction SilentlyContinue
+    Remove-Item -Recurse -Force "C:\Apache24" -ErrorAction SilentlyContinue
+
     if ($Origen -eq "ftp") {
-        fn_info "Descargando desde FTP 127.0.0.1..."
-        try { Invoke-WebRequest "ftp://localhost/pub/windows/apache/httpd.zip" -OutFile $destZip } catch { fn_err "No hay Apache en FTP." }
-    } else {
-        fn_info "Descargando desde WEB internet..."
-        Invoke-WebRequest "https://www.apachelounge.com/download/VS17/binaries/httpd-2.4.62-win64-VS17.zip" -UserAgent $Global:USER_AGENT -OutFile $destZip
+        fn_info "Buscando Apache en repositorio FTP/local..."
+
+        $candidatos = @(
+            "C:\Practica7_FTP\LocalUser\Public\pub\windows\apache\httpd.zip",
+            "C:\Practica7_FTP\pub\windows\apache\httpd.zip",
+            "C:\inetpub\ftproot\LocalUser\Public\pub\windows\apache\httpd.zip",
+            "C:\inetpub\ftproot\pub\windows\apache\httpd.zip"
+        )
+
+        $zipLocal = $candidatos | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+        if ($zipLocal) {
+            fn_ok "Apache encontrado en: $zipLocal"
+            Copy-Item $zipLocal $destZip -Force
+        }
+        else {
+            fn_info "No se encontro por ruta local. Intentando por FTP..."
+            try {
+                Invoke-WebRequest "ftp://127.0.0.1/pub/windows/apache/httpd.zip" -OutFile $destZip -ErrorAction Stop
+            } catch {
+                fn_err "No hay Apache en FTP."
+                Read-Host "Presiona ENTER para continuar"
+                return
+            }
+        }
+    }
+    else {
+        fn_info "Descargando Apache desde WEB..."
+        try {
+            Invoke-WebRequest "https://www.apachelounge.com/download/VS17/binaries/httpd-2.4.62-win64-VS17.zip" `
+                -UserAgent $Global:USER_AGENT `
+                -OutFile $destZip `
+                -ErrorAction Stop
+        } catch {
+            fn_err "No se pudo descargar Apache desde internet: $($_.Exception.Message)"
+            Read-Host "Presiona ENTER para continuar"
+            return
+        }
     }
 
-    fn_info "Descomprimiendo Apache en C:\Apache24..."
-    Remove-Item -Recurse -Force "C:\Apache24" -ErrorAction SilentlyContinue
-    Expand-Archive $destZip -DestinationPath "C:\" -Force
+    if (-not (Test-Path $destZip)) {
+        fn_err "No existe el archivo $destZip. Se cancela la instalacion."
+        Read-Host "Presiona ENTER para continuar"
+        return
+    }
+
+    fn_info "Descomprimiendo Apache en C:\ ..."
+    try {
+        Expand-Archive $destZip -DestinationPath "C:\" -Force -ErrorAction Stop
+    } catch {
+        fn_err "Fallo al descomprimir Apache: $($_.Exception.Message)"
+        Read-Host "Presiona ENTER para continuar"
+        return
+    }
+
+    if (-not (Test-Path "C:\Apache24")) {
+        $extraida = Get-ChildItem "C:\" -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "^Apache24" } | Select-Object -First 1
+        if ($extraida -and $extraida.FullName -ne "C:\Apache24") {
+            Rename-Item $extraida.FullName "C:\Apache24" -Force
+        }
+    }
+
+    if (-not (Test-Path "C:\Apache24\conf\httpd.conf")) {
+        fn_err "No se encontro C:\Apache24\conf\httpd.conf despues de extraer Apache."
+        Read-Host "Presiona ENTER para continuar"
+        return
+    }
 
     $conf = "C:\Apache24\conf\httpd.conf"
-    
-    (Get-Content $conf) -replace "^Listen \d+", "Listen $Puerto" | Set-Content $conf
-    (Get-Content $conf) -replace "^ServerName localhost:80", "ServerName $($script:DOMINIO):$Puerto" | Set-Content $conf
+
+    (Get-Content $conf) -replace '^Listen\s+\d+', "Listen $Puerto" | Set-Content $conf
+    (Get-Content $conf) -replace '#ServerName www.example.com:80', "ServerName $($script:DOMINIO):$Puerto" | Set-Content $conf
+    (Get-Content $conf) -replace '^ServerName\s+localhost:80', "ServerName $($script:DOMINIO):$Puerto" | Set-Content $conf
 
     $SSL_DIR = "C:/ssl/apache"
     if ($SSL -eq "s") {
+        fn_info "Preparando SSL para Apache..."
         fn_generar_certificado_ssl "apache"
-        $sslBlock = @"
+
+        if ((Test-Path "$SSL_DIR/server.crt") -and (Test-Path "$SSL_DIR/server.key")) {
+            $sslBlock = @"
+
 LoadModule ssl_module modules/mod_ssl.so
 LoadModule socache_shmcb_module modules/mod_socache_shmcb.so
+Include conf/extra/httpd-ssl.conf
 
 <VirtualHost *:$Puerto>
     ServerName $script:DOMINIO
     DocumentRoot "C:/Apache24/htdocs"
     SSLEngine on
-    SSLCertificateFile    "$SSL_DIR/server.crt"
+    SSLCertificateFile "$SSL_DIR/server.crt"
     SSLCertificateKeyFile "$SSL_DIR/server.key"
 </VirtualHost>
 "@
-        Add-Content $conf $sslBlock
+
+            Add-Content $conf $sslBlock
+        }
+        else {
+            fn_err "No se encontraron los archivos del certificado SSL. Apache seguira sin SSL."
+        }
+    }
+
+    if (-not (Test-Path "C:\Apache24\htdocs")) {
+        New-Item -Path "C:\Apache24\htdocs" -ItemType Directory -Force | Out-Null
     }
 
     $HTML = @"
@@ -307,9 +384,27 @@ LoadModule socache_shmcb_module modules/mod_socache_shmcb.so
 "@
     Set-Content "C:\Apache24\htdocs\index.html" $HTML -Force
 
-    C:\Apache24\bin\httpd.exe -k install -n Apache24 > $null 2>&1
-    Start-Service Apache24
-    fn_ok "Apache levantado en el puerto $Puerto."
+    if (-not (Test-Path "C:\Apache24\bin\httpd.exe")) {
+        fn_err "No existe C:\Apache24\bin\httpd.exe. La instalacion de Apache quedo incompleta."
+        Read-Host "Presiona ENTER para continuar"
+        return
+    }
+
+    & "C:\Apache24\bin\httpd.exe" -k install -n Apache24 | Out-Null
+    Start-Service Apache24 -ErrorAction SilentlyContinue
+
+    if (-not (Get-NetFirewallRule -DisplayName "Practica7 Apache $Puerto" -ErrorAction SilentlyContinue)) {
+        New-NetFirewallRule -DisplayName "Practica7 Apache $Puerto" -Direction Inbound -Action Allow -Protocol TCP -LocalPort $Puerto | Out-Null
+    }
+
+    Start-Sleep -Seconds 2
+
+    $svc = Get-Service Apache24 -ErrorAction SilentlyContinue
+    if ($svc -and $svc.Status -eq 'Running') {
+        fn_ok "Apache levantado correctamente en el puerto $Puerto."
+    } else {
+        fn_err "Apache no inicio correctamente."
+    }
 }
 
 function fn_nginx_install {
