@@ -609,24 +609,31 @@ http {
         return
     }
 
-    New-Service -Name "nginx" `
-        -BinaryPathName "`"C:\nginx\nginx.exe`" -p `"C:\nginx\`" -c `"conf\nginx.conf`"" `
-        -DisplayName "nginx" `
-        -StartupType Automatic `
-        -ErrorAction SilentlyContinue | Out-Null
+    # Iniciar Nginx como proceso normal en lugar de servicio
+    Get-Process nginx -ErrorAction SilentlyContinue | Stop-Process -Force
+    Start-Sleep -Seconds 1
 
-    Start-Service nginx -ErrorAction SilentlyContinue
+    Start-Process -FilePath "C:\nginx\nginx.exe" `
+        -ArgumentList '-p', 'C:\nginx\', '-c', 'conf\nginx.conf' `
+        -WorkingDirectory "C:\nginx" `
+        -WindowStyle Hidden
 
     if (-not (Get-NetFirewallRule -DisplayName "Practica7 Nginx $Puerto" -ErrorAction SilentlyContinue)) {
         New-NetFirewallRule -DisplayName "Practica7 Nginx $Puerto" -Direction Inbound -Action Allow -Protocol TCP -LocalPort $Puerto | Out-Null
     }
 
-    Start-Sleep -Seconds 2
-    $svc = Get-Service nginx -ErrorAction SilentlyContinue
-    if ($svc) { $svc.Refresh() }
+    Start-Sleep -Seconds 3
 
-    if ($svc -and $svc.Status -eq 'Running') {
+    $proc = Get-Process nginx -ErrorAction SilentlyContinue
+    $listen = Get-NetTCPConnection -State Listen -LocalPort $Puerto -ErrorAction SilentlyContinue
+
+    if ($proc -and $listen) {
         fn_ok "Nginx levantado correctamente en el puerto $Puerto."
+        if ($SSL -eq "s") {
+            Write-Host "URL: https://$env:COMPUTERNAME`:$Puerto" -ForegroundColor Green
+        } else {
+            Write-Host "URL: http://$env:COMPUTERNAME`:$Puerto" -ForegroundColor Green
+        }
     } else {
         fn_err "Nginx no inicio correctamente."
         Get-Content "C:\nginx\logs\error.log" -Tail 30 -ErrorAction SilentlyContinue
