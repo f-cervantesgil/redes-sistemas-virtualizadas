@@ -359,7 +359,7 @@ function fn_setup_applocker {
     # Construir XML de politica AppLocker (solo ASCII)
     $xmlContent  = '<?xml version="1.0" encoding="utf-8"?>' + "`n"
     $xmlContent += '<AppLockerPolicy Version="1">' + "`n"
-    $xmlContent += '  <RuleCollection Type="Exe" EnforcementMode="Enforced">' + "`n"
+    $xmlContent += '  <RuleCollection Type="Exe" EnforcementMode="Enabled">' + "`n"
 
     # Regla 1: Administradores - Permitir todo
     $xmlContent += '    <FilePathRule Id="fd686d83-a829-4351-8ff4-27c7de5755d2"' + "`n"
