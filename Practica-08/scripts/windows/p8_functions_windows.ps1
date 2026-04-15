@@ -181,15 +181,16 @@ function fn_import_users_csv {
                 AccountPassword   = (ConvertTo-SecureString $u.Password -AsPlainText -Force)
                 Enabled           = $true
                 Path              = "OU=$uo,$Domain"
-                LogonHours        = $logonHours
                 HomeDirectory     = $homePath
                 HomeDrive         = "H:"
                 Description       = "P8-$tipo"
             }
             New-ADUser @params
-            fn_ok "Usuario '$($u.Username)' creado en UO=$uo"
+            # LogonHours no es parametro de New-ADUser, se aplica despues con Replace
+            Set-ADUser -Identity $u.Username -Replace @{ logonHours = $logonHours }
+            fn_ok "Usuario '$($u.Username)' creado en UO=$uo con LogonHours aplicados."
         } else {
-            Set-ADUser -Identity $u.Username -LogonHours $logonHours -HomeDirectory $homePath -HomeDrive "H:"
+            Set-ADUser -Identity $u.Username -Replace @{ logonHours = $logonHours } -HomeDirectory $homePath -HomeDrive "H:"
             fn_info "Usuario '$($u.Username)' ya existe, horario y home actualizados."
         }
 
