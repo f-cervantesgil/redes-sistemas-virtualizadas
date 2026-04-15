@@ -142,7 +142,26 @@ function Get-LogonHoursBytes {
 }
 
 # =============================================================================
-# 7. IMPORTAR USUARIOS DESDE CSV
+# 7. APLICAR LOGON HOURS VIA ADSI (evita error 8318 con Set-ADUser -Replace)
+# =============================================================================
+function fn_set_logon_hours {
+    param([string]$username, [byte[]]$hours)
+    try {
+        $searcher = New-Object DirectoryServices.DirectorySearcher
+        $searcher.Filter = "(sAMAccountName=$username)"
+        $result = $searcher.FindOne()
+        if ($null -eq $result) { fn_err "Usuario '$username' no encontrado en AD."; return }
+        $adUser = $result.GetDirectoryEntry()
+        $adUser.Put("logonHours", $hours)
+        $adUser.SetInfo()
+        fn_ok "LogonHours aplicados a '$username'."
+    } catch {
+        fn_err "Error aplicando LogonHours a '$username': $($_.Exception.Message)"
+    }
+}
+
+# =============================================================================
+# 8. IMPORTAR USUARIOS DESDE CSV
 #    Columnas: Nombre, Username, Password, Tipo  (Tipo = Cuates | NoCuates)
 # =============================================================================
 function fn_import_users_csv {
@@ -186,13 +205,14 @@ function fn_import_users_csv {
                 Description       = "P8-$tipo"
             }
             New-ADUser @params
-            # LogonHours no es parametro de New-ADUser, se aplica despues con Replace
-            Set-ADUser -Identity $u.Username -Replace @{ logonHours = $logonHours }
-            fn_ok "Usuario '$($u.Username)' creado en UO=$uo con LogonHours aplicados."
+            fn_ok "Usuario '$($u.Username)' creado en UO=$uo."
         } else {
-            Set-ADUser -Identity $u.Username -Replace @{ logonHours = $logonHours } -HomeDirectory $homePath -HomeDrive "H:"
-            fn_info "Usuario '$($u.Username)' ya existe, horario y home actualizados."
+            Set-ADUser -Identity $u.Username -HomeDirectory $homePath -HomeDrive "H:"
+            fn_info "Usuario '$($u.Username)' ya existe, home actualizado."
         }
+
+        # Aplicar LogonHours via ADSI (no usa -Replace, funciona siempre)
+        fn_set_logon_hours $u.Username $logonHours
 
         try {
             Add-ADGroupMember -Identity $group -Members $u.Username -ErrorAction Stop
