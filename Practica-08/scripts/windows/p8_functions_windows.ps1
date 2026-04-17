@@ -85,14 +85,17 @@ function fn_import_users_csv {
         $group = if ($tipo -eq "Cuates") { "G_Cuates" } else { "G_NoCuates" }
         $hours = if ($tipo -eq "Cuates") { $hC } else { $hN }
 
-        if (-not (Get-ADUser -Filter "SamAccountName -eq '$($u.Username)'")) {
+        if (-not (Get-ADUser -Filter "SamAccountName -eq '$($u.Username)'" -ErrorAction SilentlyContinue)) {
             $pass = ConvertTo-SecureString $u.Password -AsPlainText -Force
-            # Crear usuario paso a paso para evitar errores de parametros
-            $newUser = New-ADUser -Name $u.Nombre -SamAccountName $u.Username -AccountPassword $pass -Enabled $true -Path "OU=$uoName,$Domain" -PassThru
-            # Aplicar LogonHours por separado para mayor estabilidad
-            Set-ADUser -Identity $newUser -LogonHours $hours
+            # 1. Crear usuario base
+            New-ADUser -Name $u.Nombre -SamAccountName $u.Username -AccountPassword $pass -Enabled $true -Path "OU=$uoName,$Domain"
+            
+            # 2. SECCIÓN BLINDADA: Usar -Replace para forzar el horario en la base de datos de AD
+            Set-ADUser -Identity $u.Username -Replace @{logonHours = $hours}
+            
+            # 3. Asignar a grupo
             Add-ADGroupMember -Identity $group -Members $u.Username
-            fn_ok "Usuario $($u.Username) creado y configurado."
+            fn_ok "Usuario $($u.Username) creado y horario configurado correctamente."
         }
     }
 }
