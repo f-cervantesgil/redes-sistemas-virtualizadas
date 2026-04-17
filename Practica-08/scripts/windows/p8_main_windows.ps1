@@ -47,13 +47,3 @@ while ($Running) {
         Clear-Host
     }
 }
-
-function fn_join_domain {
-    $dom = Read-Host "Ingresa el nombre del dominio (ej: redes.local)"
-    fn_info "Uniendose al dominio $dom... Te pedira credenciales."
-    try {
-        Add-Computer -DomainName $dom -Restart -Force
-    } catch {
-        fn_err "Fallo la union al dominio: $($_.Exception.Message)"
-    }
-}
