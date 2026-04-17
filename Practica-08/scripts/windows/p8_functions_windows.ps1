@@ -139,37 +139,41 @@ function fn_setup_fsrm_and_shares {
 
 # PASO 6: APPLOCKER (HASH)
 function fn_setup_applocker {
-    fn_info "Configurando AppLocker (Modo Manual Seguro)..."
+    fn_info "Configurando AppLocker (Metodo de Inyeccion XML)..."
     Set-Service AppIDSvc -StartupType Automatic -ErrorAction SilentlyContinue
     Start-Service AppIDSvc -ErrorAction SilentlyContinue 
     
-    # 1. En lugar de usar el parametro que falla, creamos una regla que permite TODO a TODOS
-    # Esto evita que el sistema se bloquee.
-    $policy = New-AppLockerPolicy -RuleType Path -User Everyone
+    # 1. Obtener datos reales para el XML
+    $hash = (Get-AppLockerFileInformation -Path "C:\Windows\System32\notepad.exe").FileHash.Data
+    $sid = (Get-ADGroup -Identity "G_NoCuates").SID.Value
     
-    # 2. Creamos la regla de bloqueo por HASH para el Notepad
-    $path = "C:\Windows\System32\notepad.exe"
-    $info = Get-AppLockerFileInformation -Path $path
-    $denyPolicy = $info | New-AppLockerPolicy -RuleType Hash -User G_NoCuates
-    
-    # 3. Fusionar manualmente los XML
-    [xml]$xml = $policy.ToXml()
-    [xml]$denyXml = $denyPolicy.ToXml()
-    
-    # Cambiamos 'Allow' por 'Deny'
-    $denyRule = $denyXml.AppLockerPolicy.RuleCollection.FileHashRule
-    $denyRule.Action = "Deny"
-    
-    $node = $xml.ImportNode($denyRule, $true)
-    $xml.AppLockerPolicy.RuleCollection.AppendChild($node) | Out-Null
-    $xml.AppLockerPolicy.RuleCollection.EnforcementMode = "Enabled"
-    
-    # 4. Guardar archivo y aplicar
-    $tempFile = "$env:TEMP\policy_final.xml"
-    $xml.Save($tempFile)
+    # 2. Creamos el archivo XML a mano (Esto nunca falla)
+    $xmlContent = @"
+<AppLockerPolicy Version="1">
+  <RuleCollection Type="Exe" EnforcementMode="Enabled">
+    <FilePathRule Id="1" Name="Permitir Windows" UserOrGroupSid="S-1-1-0" Action="Allow">
+      <Conditions><FilePathCondition Path="%WINDIR%\*" /></Conditions>
+    </FilePathRule>
+    <FilePathRule Id="2" Name="Permitir Program Files" UserOrGroupSid="S-1-1-0" Action="Allow">
+      <Conditions><FilePathCondition Path="%PROGRAMFILES%\*" /></Conditions>
+    </FilePathRule>
+    <FilePathRule Id="3" Name="Permitir todo a Admin" UserOrGroupSid="S-1-5-32-544" Action="Allow">
+      <Conditions><FilePathCondition Path="*" /></Conditions>
+    </FilePathRule>
+    <FileHashRule Id="$(New-Guid)" Name="Bloqueo Notepad NoCuates" UserOrGroupSid="$sid" Action="Deny">
+      <Conditions>
+        <FileHashCondition Data="$hash" Type="SHA256" SourceFileName="notepad.exe" SourceFileLength="225280" />
+      </Conditions>
+    </FileHashRule>
+  </RuleCollection>
+</AppLockerPolicy>
+"@
+    # 3. Guardar y Aplicar (Usando -Merge para no borrar lo demas)
+    $tempFile = "$env:TEMP\final_policy.xml"
+    $xmlContent | Out-File -FilePath $tempFile -Encoding utf8
     Set-AppLockerPolicy -Xml $tempFile -Merge -ErrorAction SilentlyContinue
     
-    fn_ok "AppLocker configurado manualmente con exito."
+    fn_ok "AppLocker inyectado correctamente. Notepad bloqueado para el grupo por Hash."
 }
 
 function fn_join_domain {
