@@ -135,3 +135,13 @@ function fn_setup_applocker {
     Set-AppLockerPolicy -PolicyObject $policy -ErrorAction SilentlyContinue
     fn_ok "AppLocker configurado para bloquear Notepad a No Cuates."
 }
+
+function fn_join_domain {
+    $dom = Read-Host "Ingresa el nombre del dominio (ej: redes.local)"
+    fn_info "Uniendose al dominio $dom... Te pedira credenciales de Administrador."
+    try {
+        Add-Computer -DomainName $dom -Restart -Force
+    } catch {
+        fn_err "Fallo la union al dominio: $($_.Exception.Message)"
+    }
+}
