@@ -142,9 +142,13 @@ function fn_setup_applocker {
     # 3. TRUCO: Convertir a XML y cambiar 'Allow' por 'Deny'
     [xml]$xml = $policyObj.ToXml()
     $xml.AppLockerPolicy.RuleCollection.FileHashRule.Action = "Deny"
-    # 4. Aplicar la politica editada como texto XML
-    Set-AppLockerPolicy -Xml $xml.OuterXml -ErrorAction SilentlyContinue
     
+    # 4. Guardar en un archivo temporal (Set-AppLockerPolicy pide un ARCHIVO)
+    $tempPath = "$env:TEMP\policy.xml"
+    $xml.Save($tempPath)
+    
+    # 5. Aplicar la politica desde el archivo
+    Set-AppLockerPolicy -Xml $tempPath -Merge -ErrorAction SilentlyContinue
     fn_ok "Notepad BLOQUEADO (Deny) por Hash para No Cuates."
 }
 
