@@ -38,7 +38,7 @@ function fn_check_dc {
 }
 
 function fn_setup_ad_structure {
-    return if (-not (fn_check_dc))
+    if (-not (fn_check_dc)) { return }
     fn_info "Configurando UOs y Grupos..."
     $Domain = (Get-ADDomain).DistinguishedName
     
