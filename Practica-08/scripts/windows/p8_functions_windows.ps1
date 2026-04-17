@@ -130,13 +130,22 @@ function fn_setup_fsrm_and_shares {
 }
 
 function fn_setup_applocker {
-    fn_info "Configurando AppLocker..."
+    fn_info "Configurando AppLocker (Regla de Bloqueo por Hash)..."
     Set-Service AppIDSvc -StartupType Automatic -ErrorAction SilentlyContinue
     Start-Service AppIDSvc -ErrorAction SilentlyContinue
+    
     $path = "C:\Windows\System32\notepad.exe"
-    $policy = Get-AppLockerFileInformation -Path $path | New-AppLockerPolicy -RuleType Hash -User G_NoCuates -Deny
-    Set-AppLockerPolicy -PolicyObject $policy -ErrorAction SilentlyContinue
-    fn_ok "Notepad bloqueado por Hash para No Cuates."
+    # 1. Generar la informacion del archivo
+    $info = Get-AppLockerFileInformation -Path $path
+    # 2. Crear una politica base (que por defecto es Allow)
+    $policyObj = $info | New-AppLockerPolicy -RuleType Hash -User G_NoCuates
+    # 3. TRUCO: Convertir a XML y cambiar 'Allow' por 'Deny'
+    [xml]$xml = $policyObj.ToXml()
+    $xml.AppLockerPolicy.RuleCollection.FileHashRule.Action = "Deny"
+    # 4. Aplicar la politica editada
+    Set-AppLockerPolicy -PolicyObject $xml -ErrorAction SilentlyContinue
+    
+    fn_ok "Notepad BLOQUEADO (Deny) por Hash para No Cuates."
 }
 
 function fn_join_domain {
