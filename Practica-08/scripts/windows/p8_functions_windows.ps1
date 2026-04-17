@@ -139,43 +139,35 @@ function fn_setup_fsrm_and_shares {
 
 # PASO 6: APPLOCKER (HASH)
 function fn_setup_applocker {
-    fn_info "Configurando AppLocker SEGURO (Prohibido Notepad solo a No Cuates)..."
+    fn_info "Configurando AppLocker SEGURO (Solo bloquea Notepad a No Cuates)..."
     Set-Service AppIDSvc -StartupType Automatic -ErrorAction SilentlyContinue
-    Start-Service AppIDSvc -ErrorAction SilentlyContinue
+    Start-Service AppIDSvc -ErrorAction SilentlyContinue 
     
-    # 1. Crear politica BASE que permita TODO en Windows y Archivos de Programa a TODO EL MUNDO
-    $policy = New-AppLockerPolicy -RuleType Path -User Everyone -IncludeDefaultRules
+    # 1. Crear politica con reglas por defecto (Forma compatible)
+    $policy = New-AppLockerPolicy -IncludeDefaultRules
     
-    # 2. Crear una regla explicita de "Permitir Todo" para ADMINISTRADORES (Seguro de vida)
-    $adminPolicy = New-AppLockerPolicy -RuleType Path -User "Administrators"
-    
-    # 3. Regla de BLOQUEO por Hash para No Cuates
+    # 2. Crear bloqueo por Hash
     $path = "C:\Windows\System32\notepad.exe"
     $info = Get-AppLockerFileInformation -Path $path
     $denyPolicy = $info | New-AppLockerPolicy -RuleType Hash -User G_NoCuates
     
-    # 4. TRUCO XML: Unir todo de forma segura
+    # 3. Fusionar XML
     [xml]$xml = $policy.ToXml()
     [xml]$denyXml = $denyPolicy.ToXml()
     
-    # Cambiamos 'Allow' por 'Deny' para el No Cuate
     $denyRule = $denyXml.AppLockerPolicy.RuleCollection.FileHashRule
     $denyRule.Action = "Deny"
-    $denyRule.Name = "Bloqueo Notepad - No Cuates"
     
-    # Insertamos la regla de denegacion
     $node = $xml.ImportNode($denyRule, $true)
     $xml.AppLockerPolicy.RuleCollection.AppendChild($node) | Out-Null
-    
-    # Forzamos modo "Enabled"
     $xml.AppLockerPolicy.RuleCollection.EnforcementMode = "Enabled"
     
-    # 5. Guardar y Aplicar
-    $tempFile = "$env:TEMP\policy_safe_v3.xml"
+    # 4. Aplicar
+    $tempFile = "$env:TEMP\policy_final.xml"
     $xml.Save($tempFile)
     Set-AppLockerPolicy -Xml $tempFile -Merge -ErrorAction SilentlyContinue
     
-    fn_ok "AppLocker listo: Sistema usable para ti, Notepad bloqueado para No Cuates."
+    fn_ok "AppLocker configurado correctamente."
 }
 
 function fn_join_domain {
