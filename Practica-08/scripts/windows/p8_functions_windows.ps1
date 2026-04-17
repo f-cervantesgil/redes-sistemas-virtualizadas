@@ -139,22 +139,24 @@ function fn_setup_fsrm_and_shares {
 
 # PASO 6: APPLOCKER (HASH)
 function fn_setup_applocker {
-    fn_info "Configurando AppLocker SEGURO (Solo bloquea Notepad a No Cuates)..."
+    fn_info "Configurando AppLocker (Modo Manual Seguro)..."
     Set-Service AppIDSvc -StartupType Automatic -ErrorAction SilentlyContinue
     Start-Service AppIDSvc -ErrorAction SilentlyContinue 
     
-    # 1. Crear politica con reglas por defecto (Forma compatible)
-    $policy = New-AppLockerPolicy -IncludeDefaultRules
+    # 1. En lugar de usar el parametro que falla, creamos una regla que permite TODO a TODOS
+    # Esto evita que el sistema se bloquee.
+    $policy = New-AppLockerPolicy -RuleType Path -User Everyone
     
-    # 2. Crear bloqueo por Hash
+    # 2. Creamos la regla de bloqueo por HASH para el Notepad
     $path = "C:\Windows\System32\notepad.exe"
     $info = Get-AppLockerFileInformation -Path $path
     $denyPolicy = $info | New-AppLockerPolicy -RuleType Hash -User G_NoCuates
     
-    # 3. Fusionar XML
+    # 3. Fusionar manualmente los XML
     [xml]$xml = $policy.ToXml()
     [xml]$denyXml = $denyPolicy.ToXml()
     
+    # Cambiamos 'Allow' por 'Deny'
     $denyRule = $denyXml.AppLockerPolicy.RuleCollection.FileHashRule
     $denyRule.Action = "Deny"
     
@@ -162,12 +164,12 @@ function fn_setup_applocker {
     $xml.AppLockerPolicy.RuleCollection.AppendChild($node) | Out-Null
     $xml.AppLockerPolicy.RuleCollection.EnforcementMode = "Enabled"
     
-    # 4. Aplicar
+    # 4. Guardar archivo y aplicar
     $tempFile = "$env:TEMP\policy_final.xml"
     $xml.Save($tempFile)
     Set-AppLockerPolicy -Xml $tempFile -Merge -ErrorAction SilentlyContinue
     
-    fn_ok "AppLocker configurado correctamente."
+    fn_ok "AppLocker configurado manualmente con exito."
 }
 
 function fn_join_domain {
