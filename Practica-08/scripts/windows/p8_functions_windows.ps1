@@ -96,8 +96,9 @@ function fn_import_users_csv {
         if (-not (Get-ADUser -Filter "SamAccountName -eq '$($u.Username)'" -ErrorAction SilentlyContinue)) {
             $pass = ConvertTo-SecureString $u.Password -AsPlainText -Force
             New-ADUser -Name $u.Nombre -SamAccountName $u.Username -AccountPassword $pass -Enabled $true -Path "OU=$uoName,$Domain"
-            # Forzar Atributos
-            Set-ADUser -Identity $u.Username -Replace @{logonHours = $hours}
+            # 2. SECCIÓN BLINDADA: Limpiar y luego reemplazar para evitar errores de "ya existente"
+            Set-ADUser -Identity $u.Username -Clear logonHours -ErrorAction SilentlyContinue
+            Set-ADUser -Identity $u.Username -Replace @{logonHours = $hours} -ErrorAction SilentlyContinue
             Add-ADGroupMember -Identity $grpIdentity -Members $u.Username
             fn_ok "Usuario $($u.Username) ($tipo) - Creado con exito."
         }
@@ -140,7 +141,7 @@ function fn_setup_fsrm_and_shares {
 function fn_setup_applocker {
     fn_info "Configurando Regla de AppLocker (Hash de Notepad)..."
     Set-Service AppIDSvc -StartupType Automatic -ErrorAction SilentlyContinue
-    Start-Service AppIDSvc -ErrorAction SilentlyContinue -Force
+    Start-Service AppIDSvc -ErrorAction SilentlyContinue
     
     $targetPath = "C:\Windows\System32\notepad.exe"
     $info = Get-AppLockerFileInformation -Path $targetPath
