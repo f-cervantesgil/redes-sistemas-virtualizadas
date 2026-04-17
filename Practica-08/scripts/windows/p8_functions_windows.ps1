@@ -1,5 +1,5 @@
 # p8_functions_windows.ps1
-# Funciones para Practica 08 - Versión Final Corregida
+# VERSION DEFINITIVA 100% - PRACTICA 08
 
 function fn_info { Write-Host "[INFO] $($args)" -ForegroundColor Yellow }
 function fn_ok { Write-Host "[OK] $($args)" -ForegroundColor Green }
@@ -13,18 +13,24 @@ function fn_check_admin {
     }
 }
 
+# PASO 1: INSTALAR CARACTERISTICAS
 function fn_install_features {
-    fn_info "Instalando Roles de Servidor (AD DS, FSRM, GPMC)..."
-    Install-WindowsFeature AD-Domain-Services, FS-Resource-Manager, GPMC, RSAT-AD-PowerShell -IncludeManagementTools
-    fn_ok "Instalacion de roles completada."
+    fn_info "Instalando Roles de Servidor y Herramientas (AD, FSRM, GPMC)..."
+    try {
+        Install-WindowsFeature AD-Domain-Services, FS-Resource-Manager, GPMC, RSAT-AD-PowerShell -IncludeManagementTools -ErrorAction Stop
+        fn_ok "Instalacion de roles completada con exito."
+    } catch {
+        fn_err "Fallo la instalacion de roles: $($_.Exception.Message)"
+    }
 }
 
+# PASO 2: PROMOVER DOMINIO
 function fn_promote_dc {
-    fn_info "Iniciando Promocion a Controlador de Dominio (redes.local)..."
-    fn_info "IMPORTANTE: El sistema se REINICIARA solo al terminar."
+    fn_info "Iniciando Forest (redes.local)... El equipo se REINICIARA solo."
     Start-Sleep -Seconds 3
     Import-Module ADDSDeployment
-    Install-ADDSForest -DomainName "redes.local" -InstallDns -Force
+    $pass = Read-Host "Ingresa Contrasena de Restauracion (DSRM)" -AsSecureString
+    Install-ADDSForest -DomainName "redes.local" -InstallDns -SafeModeAdministratorPassword $pass -Force
 }
 
 function fn_check_dc {
@@ -32,11 +38,12 @@ function fn_check_dc {
         $dom = Get-ADDomain -ErrorAction Stop
         return $true
     } catch {
-        fn_err "Dominio no detectado. Debes promocionar el servidor a DC primero."
+        fn_err "No se detecta un dominio. Ejecuta la promocion (Paso 2) primero."
         return $false
     }
 }
 
+# PASO 4: ESTRUCTURA AD
 function fn_setup_ad_structure {
     if (-not (fn_check_dc)) { return }
     fn_info "Configurando UOs y Grupos..."
@@ -47,13 +54,13 @@ function fn_setup_ad_structure {
             New-ADOrganizationalUnit -Name $uo -Path $Domain -ProtectedFromAccidentalDeletion $false
         }
     }
-    foreach ($g in @("G_Cuates", "G_NoCuates")) {
-        if (-not (Get-ADGroup -Filter "Name -eq '$g'" -ErrorAction SilentlyContinue)) {
-            $path = if ($g -match "Cuates") { "OU=Cuates,$Domain" } else { "OU=No Cuates,$Domain" }
-            New-ADGroup -Name $g -GroupScope Global -Path $path
+    foreach ($grpName in @("G_Cuates", "G_NoCuates")) {
+        if (-not (Get-ADGroup -Filter "Name -eq '$grpName'" -ErrorAction SilentlyContinue)) {
+            $path = if ($grpName -match "Cuates") { "OU=Cuates,$Domain" } else { "OU=No Cuates,$Domain" }
+            New-ADGroup -Name $grpName -GroupScope Global -Path $path
         }
     }
-    fn_ok "Estructura AD lista."
+    fn_ok "UOs y Grupos (G_Cuates, G_NoCuates) listos."
 }
 
 function Get-LogonHoursBytes {
@@ -73,7 +80,8 @@ function Get-LogonHoursBytes {
 
 function fn_import_users_csv {
     $csv = "$ScriptDir\..\..\data\usuarios.csv"
-    if (-not (Test-Path $csv)) { fn_err "No hay CSV en $csv"; return }
+    if (-not (Test-Path $csv)) { fn_err "No se encontro el archivo CSV en $csv"; return }
+    
     $users = Import-Csv $csv
     $hC = Get-LogonHoursBytes 8 15
     $hN = Get-LogonHoursBytes 15 2
@@ -82,82 +90,79 @@ function fn_import_users_csv {
     foreach ($u in $users) {
         $tipo = $u.Tipo.Trim()
         $uoName = if ($tipo -eq "Cuates") { "Cuates" } else { "No Cuates" }
-        $group = if ($tipo -eq "Cuates") { "G_Cuates" } else { "G_NoCuates" }
+        $grpIdentity = if ($tipo -eq "Cuates") { "G_Cuates" } else { "G_NoCuates" }
         $hours = if ($tipo -eq "Cuates") { $hC } else { $hN }
 
         if (-not (Get-ADUser -Filter "SamAccountName -eq '$($u.Username)'" -ErrorAction SilentlyContinue)) {
             $pass = ConvertTo-SecureString $u.Password -AsPlainText -Force
-            # 1. Crear usuario base
             New-ADUser -Name $u.Nombre -SamAccountName $u.Username -AccountPassword $pass -Enabled $true -Path "OU=$uoName,$Domain"
-            
-            # 2. SECCIÓN BLINDADA: Usar -Replace para forzar el horario en la base de datos de AD
+            # Forzar Atributos
             Set-ADUser -Identity $u.Username -Replace @{logonHours = $hours}
-            
-            # 3. Asignar a grupo
-            Add-ADGroupMember -Identity $group -Members $u.Username
-            fn_ok "Usuario $($u.Username) creado y horario configurado correctamente."
+            Add-ADGroupMember -Identity $grpIdentity -Members $u.Username
+            fn_ok "Usuario $($u.Username) ($tipo) - Creado con exito."
         }
     }
 }
 
+# PASO 5: FSRM Y CARPETAS COMPARTIDAS
 function fn_setup_fsrm_and_shares {
-    fn_info "Configurando FSRM y Carpetas..."
+    fn_info "Configurando FSRM, Carpetas y Permisos SMB..."
     Import-Module FileServerResourceManager
 
     $paths = @{ "Documentos_Cuates"="C:\Users\Public\Cuates_Docs"; "Documentos_NoCuates"="C:\Users\Public\NoCuates_Docs" }
-    foreach ($name in $paths.Keys) {
-        $path = $paths[$name]
-        if (-not (Test-Path $path)) { New-Item $path -ItemType Directory -Force | Out-Null }
-        if (-not (Get-SmbShare -Name $name -ErrorAction SilentlyContinue)) {
-            New-SmbShare -Name $name -Path $path -FullAccess "Everyone" | Out-Null
+    foreach ($shareName in $paths.Keys) {
+        $fullPath = $paths[$shareName]
+        if (-not (Test-Path $fullPath)) { New-Item $fullPath -ItemType Directory -Force | Out-Null }
+        if (-not (Get-SmbShare -Name $shareName -ErrorAction SilentlyContinue)) {
+            New-SmbShare -Name $shareName -Path $fullPath -FullAccess "Everyone" -ErrorAction SilentlyContinue | Out-Null
         }
-        icacls $path /inheritance:r | Out-Null
-        $grp = if ($name -match "Cuates") { "G_Cuates" } else { "G_NoCuates" }
-        icacls $path /grant "${grp}:(OI)(CI)F" /grant "Administrators:(OI)(CI)F" | Out-Null
+        # Permisos Estrictos por Grupo
+        icacls $fullPath /inheritance:r | Out-Null
+        $grp = if ($shareName -match "Cuates") { "G_Cuates" } else { "G_NoCuates" }
+        icacls $fullPath /grant "${grp}:(OI)(CI)F" /grant "Administrators:(OI)(CI)F" | Out-Null
     }
 
+    # Cuotas y Filtros
     if (-not (Get-FsrmQuota -Path "C:\Users\Public\Cuates_Docs" -ErrorAction SilentlyContinue)) {
         New-FsrmQuota -Path "C:\Users\Public\Cuates_Docs" -Size 10MB | Out-Null
         New-FsrmQuota -Path "C:\Users\Public\NoCuates_Docs" -Size 5MB | Out-Null
     }
-    if (-not (Get-FsrmFileGroup -Name "Prohibidos_P8" -ErrorAction SilentlyContinue)) {
-        New-FsrmFileGroup -Name "Prohibidos_P8" -IncludePattern @("*.mp3", "*.mp4", "*.exe", "*.msi") | Out-Null
+    if (-not (Get-FsrmFileGroup -Name "Restringidos_P8" -ErrorAction SilentlyContinue)) {
+        New-FsrmFileGroup -Name "Restringidos_P8" -IncludePattern @("*.mp3", "*.mp4", "*.exe", "*.msi") | Out-Null
     }
     if (-not (Get-FsrmFileScreen -Path "C:\Users\Public" -ErrorAction SilentlyContinue)) {
-        New-FsrmFileScreen -Path "C:\Users\Public" -IncludeGroup "Prohibidos_P8" -Active | Out-Null
+        New-FsrmFileScreen -Path "C:\Users\Public" -IncludeGroup "Restringidos_P8" -Active | Out-Null
     }
-    fn_ok "FSRM y Carpetas al 100%."
+    fn_ok "Servidor de Archivos (FSRM) configurado al 100%."
 }
 
+# PASO 6: APPLOCKER (HASH)
 function fn_setup_applocker {
-    fn_info "Configurando AppLocker (Regla de Bloqueo por Hash)..."
+    fn_info "Configurando Regla de AppLocker (Hash de Notepad)..."
     Set-Service AppIDSvc -StartupType Automatic -ErrorAction SilentlyContinue
-    Start-Service AppIDSvc -ErrorAction SilentlyContinue
+    Start-Service AppIDSvc -ErrorAction SilentlyContinue -Force
     
-    $path = "C:\Windows\System32\notepad.exe"
-    # 1. Generar la informacion del archivo
-    $info = Get-AppLockerFileInformation -Path $path
-    # 2. Crear una politica base (que por defecto es Allow)
-    $policyObj = $info | New-AppLockerPolicy -RuleType Hash -User G_NoCuates
-    # 3. TRUCO: Convertir a XML y cambiar 'Allow' por 'Deny'
+    $targetPath = "C:\Windows\System32\notepad.exe"
+    $info = Get-AppLockerFileInformation -Path $targetPath
+    $policyObj = $info | New-AppLockerPolicy -RuleType Hash -User G_NoCuates -Optimize
+    
+    # Editamos el XML para que el bloqueo sea real (Deny) y este activado
     [xml]$xml = $policyObj.ToXml()
     $xml.AppLockerPolicy.RuleCollection.FileHashRule.Action = "Deny"
+    $xml.AppLockerPolicy.RuleCollection.EnforcementMode = "Enabled"
     
-    # 4. Guardar en un archivo temporal (Set-AppLockerPolicy pide un ARCHIVO)
-    $tempPath = "$env:TEMP\policy.xml"
-    $xml.Save($tempPath)
-    
-    # 5. Aplicar la politica desde el archivo
-    Set-AppLockerPolicy -Xml $tempPath -Merge -ErrorAction SilentlyContinue
-    fn_ok "Notepad BLOQUEADO (Deny) por Hash para No Cuates."
+    $tempFile = "$env:TEMP\policy_applocker.xml"
+    $xml.Save($tempFile)
+    Set-AppLockerPolicy -Xml $tempFile -Merge -ErrorAction SilentlyContinue
+    fn_ok "Bloqueo de Notepad por Hash activado para No Cuates."
 }
 
 function fn_join_domain {
-    $dom = Read-Host "Nombre del dominio (ej: redes.local)"
-    fn_info "Uniendose a $dom... Usa Administrator@redes.local"
+    $dom = Read-Host "Nombre del dominio (redes.local)"
+    fn_info "Uniendose a $dom... Usa Administrator@redes.local para las credenciales."
     try {
         Add-Computer -DomainName $dom -Restart -Force
     } catch {
-        fn_err "Error en union: $($_.Exception.Message)"
+        fn_err "No se pudo unir al dominio: $($_.Exception.Message)"
     }
 }
