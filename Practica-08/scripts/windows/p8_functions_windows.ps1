@@ -139,9 +139,7 @@ function fn_setup_fsrm_and_shares {
 
 # PASO 6: APPLOCKER (HASH)
 function fn_setup_applocker {
-    fn_info "Configurando AppLocker (Metodo de Inyeccion XML)..."
-    Set-Service AppIDSvc -StartupType Automatic -ErrorAction SilentlyContinue
-    Start-Service AppIDSvc -ErrorAction SilentlyContinue 
+    fn_info "Configurando AppLocker a traves de GPO para los Clientes..."
     
     # 1. Obtener datos reales para el XML
     $hash = (Get-AppLockerFileInformation -Path "C:\Windows\System32\notepad.exe").FileHash.Data
@@ -168,19 +166,53 @@ function fn_setup_applocker {
   </RuleCollection>
 </AppLockerPolicy>
 "@
-    # 3. Guardar y Aplicar (Usando -Merge para no borrar lo demas)
+
+    # 3. Guardar e Inyectar en una GPO en lugar de en la politica local del servidor
     $tempFile = "$env:TEMP\final_policy.xml"
     $xmlContent | Out-File -FilePath $tempFile -Encoding utf8
-    Set-AppLockerPolicy -Xml $tempFile -Merge -ErrorAction SilentlyContinue
     
-    fn_ok "AppLocker inyectado correctamente. Notepad bloqueado para el grupo por Hash."
+    Import-Module GroupPolicy
+    $dom = (Get-ADDomain).DistinguishedName
+    $gpoName = "GPO_AppLocker_Clientes"
+
+    if (Get-GPO -Name $gpoName -ErrorAction SilentlyContinue) {
+        Remove-GPO -Name $gpoName -ErrorAction SilentlyContinue
+    }
+    $gpo = New-GPO -Name $gpoName
+    
+    $ldapPath = "LDAP://CN={$($gpo.Id)},CN=Policies,CN=System,$dom"
+    Set-AppLockerPolicy -XmlPolicy $tempFile -Ldap $ldapPath -ErrorAction Stop
+    
+    # Configurar el servicio AppIDSvc del cliente para inicio automatico mediante GPO
+    Set-GPRegistryValue -Name $gpoName -Key "HKLM\SYSTEM\CurrentControlSet\Services\AppIDSvc" -ValueName "Start" -Type DWord -Value 2 | Out-Null
+    
+    # Crear OU Equipos_Cliente y redirigir los nuevos equipos alli
+    $ouClient = "OU=Equipos_Cliente,$dom"
+    if (-not (Get-ADOrganizationalUnit -Filter "Name -eq 'Equipos_Cliente'" -ErrorAction SilentlyContinue)) {
+        New-ADOrganizationalUnit -Name "Equipos_Cliente" -Path $dom -ProtectedFromAccidentalDeletion $false
+        try { redircmp $ouClient | Out-Null } catch { }
+    }
+    
+    # Vincular GPO a la OU de Clientes
+    New-GPLink -Name $gpoName -Target $ouClient | Out-Null
+
+    fn_ok "AppLocker inyectado correctamente en GPO y enlazado a 'Equipos_Cliente'."
+    fn_ok "El Servidor no recibe el bloqueo. Todo equipo nuevo ira a esta OU."
 }
 
 function fn_join_domain {
     $dom = Read-Host "Nombre del dominio (redes.local)"
-    fn_info "Uniendose a $dom... Usa Administrator@redes.local para las credenciales."
+    fn_info "Uniendose a $dom..."
+    
+    # Solicitar credenciales correctamente
+    $cred = Get-Credential -UserName "Administrator@$dom" -Message "Ingresa la contrasena del Administrador del Dominio"
+    
+    # Asegurar el servicio AppIDSvc localmente por si la GPO tarda
+    Set-Service AppIDSvc -StartupType Automatic -ErrorAction SilentlyContinue
+    Start-Service AppIDSvc -ErrorAction SilentlyContinue
+
     try {
-        Add-Computer -DomainName $dom -Restart -Force
+        Add-Computer -DomainName $dom -Credential $cred -Restart -Force
     } catch {
         fn_err "No se pudo unir al dominio: $($_.Exception.Message)"
     }
