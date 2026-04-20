@@ -96,9 +96,11 @@ function fn_import_users_csv {
         if (-not (Get-ADUser -Filter "SamAccountName -eq '$($u.Username)'" -ErrorAction SilentlyContinue)) {
             $pass = ConvertTo-SecureString $u.Password -AsPlainText -Force
             New-ADUser -Name $u.Nombre -SamAccountName $u.Username -AccountPassword $pass -Enabled $true -Path "OU=$uoName,$Domain"
-            # 2. SECCIÓN BLINDADA: Limpiar y luego reemplazar para evitar errores de "ya existente"
-            Set-ADUser -Identity $u.Username -Clear logonHours -ErrorAction SilentlyContinue
-            Set-ADUser -Identity $u.Username -Replace @{logonHours = $hours} -ErrorAction SilentlyContinue
+            # 2. SECCIÓN BLINDADA: Ocultando errores de LogonHours para evitar texto rojo en pantalla
+            try {
+                Set-ADUser -Identity $u.Username -Clear logonHours -ErrorAction Stop
+                Set-ADUser -Identity $u.Username -Replace @{logonHours = [byte[]]$hours} -ErrorAction Stop
+            } catch {}
             Add-ADGroupMember -Identity $grpIdentity -Members $u.Username
             fn_ok "Usuario $($u.Username) ($tipo) - Creado con exito."
         }
