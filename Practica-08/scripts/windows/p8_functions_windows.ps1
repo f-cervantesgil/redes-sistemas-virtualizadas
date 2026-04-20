@@ -151,16 +151,16 @@ function fn_setup_applocker {
     $xmlContent = @"
 <AppLockerPolicy Version="1">
   <RuleCollection Type="Exe" EnforcementMode="Enabled">
-    <FilePathRule Id="1" Name="Permitir Windows" UserOrGroupSid="S-1-1-0" Action="Allow">
+    <FilePathRule Id="$([guid]::NewGuid().ToString())" Name="Permitir Windows" Description="Permitir Windows" UserOrGroupSid="S-1-1-0" Action="Allow">
       <Conditions><FilePathCondition Path="%WINDIR%\*" /></Conditions>
     </FilePathRule>
-    <FilePathRule Id="2" Name="Permitir Program Files" UserOrGroupSid="S-1-1-0" Action="Allow">
+    <FilePathRule Id="$([guid]::NewGuid().ToString())" Name="Permitir Program Files" Description="Permitir Program Files" UserOrGroupSid="S-1-1-0" Action="Allow">
       <Conditions><FilePathCondition Path="%PROGRAMFILES%\*" /></Conditions>
     </FilePathRule>
-    <FilePathRule Id="3" Name="Permitir todo a Admin" UserOrGroupSid="S-1-5-32-544" Action="Allow">
+    <FilePathRule Id="$([guid]::NewGuid().ToString())" Name="Permitir todo a Admin" Description="Admin" UserOrGroupSid="S-1-5-32-544" Action="Allow">
       <Conditions><FilePathCondition Path="*" /></Conditions>
     </FilePathRule>
-    <FileHashRule Id="$(New-Guid)" Name="Bloqueo Notepad NoCuates" UserOrGroupSid="$sid" Action="Deny">
+    <FileHashRule Id="$([guid]::NewGuid().ToString())" Name="Bloqueo Notepad NoCuates" Description="Bloqueo hash" UserOrGroupSid="$sid" Action="Deny">
       <Conditions>
         <FileHashCondition Data="$hash" Type="SHA256" SourceFileName="notepad.exe" SourceFileLength="225280" />
       </Conditions>
