@@ -162,7 +162,9 @@ function fn_setup_applocker {
     </FilePathRule>
     <FileHashRule Id="$([guid]::NewGuid().ToString())" Name="Bloqueo Notepad NoCuates" Description="Bloqueo hash" UserOrGroupSid="$sid" Action="Deny">
       <Conditions>
-        <FileHashCondition Data="$hash" Type="SHA256" SourceFileName="notepad.exe" SourceFileLength="225280" />
+        <FileHashCondition>
+          <FileHash Type="SHA256" Data="$hash" SourceFileName="notepad.exe" SourceFileLength="225280" />
+        </FileHashCondition>
       </Conditions>
     </FileHashRule>
   </RuleCollection>
