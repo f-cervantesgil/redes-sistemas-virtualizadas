@@ -170,24 +170,70 @@ function fn_setup_applocker {
     fn_info "Configurando AppLocker a traves de GPO para los Clientes..."
     
     Set-Service AppIDSvc -StartupType Automatic -ErrorAction SilentlyContinue
-    Start-Service AppIDSvc -ErrorAction SilentlyContinue 
+    Start-Service AppIDSvc -ErrorAction SilentlyContinue
 
-    # 1. Reglas por Defecto (Seguras, construidas manualmente)
-    $xmlContent = @"
+    Import-Module GroupPolicy
+    $dom = (Get-ADDomain).DistinguishedName
+    $netbios = (Get-ADDomain).NetBIOSName
+    $gpoName = "GPO_AppLocker_Clientes"
+
+    # Obtener SIDs reales de los grupos del dominio
+    $sidCuates   = (Get-ADGroup -Identity "G_Cuates").SID.Value
+    $sidNoCuates = (Get-ADGroup -Identity "G_NoCuates").SID.Value
+    $sidAdmins   = "S-1-5-32-544"  # Builtin Administrators (siempre seguro)
+    $sidEvery    = "S-1-1-0"       # Everyone
+
+    # Obtener hash SHA256 del notepad.exe del SERVIDOR para la regla Hash
+    $fileInfo    = Get-AppLockerFileInformation -Path "C:\Windows\System32\notepad.exe"
+    $hashXmlObj  = New-AppLockerPolicy -RuleType Hash -User "$netbios\G_NoCuates" -FileInformation $fileInfo -Xml
+    # Extraer el nodo FileHash del xml generado
+    [xml]$hashDoc   = $hashXmlObj
+    $hashNode       = $hashDoc.AppLockerPolicy.RuleCollection.FileHashRule.Conditions.FileHashCondition.FileHash
+    $hashData       = $hashNode.Data
+    $hashFileName   = $hashNode.SourceFileName
+    $hashFileLength = $hashNode.SourceFileLength
+
+    # Construir un XML completo y definitivo con todas las reglas en un solo bloque
+    $fullXml = @"
 <AppLockerPolicy Version="1">
   <RuleCollection Type="Exe" EnforcementMode="Enabled">
-    <FilePathRule Id="$([guid]::NewGuid().ToString())" Name="Permitir Windows" Description="Permitir Windows" UserOrGroupSid="S-1-1-0" Action="Allow">
-      <Conditions><FilePathCondition Path="%WINDIR%\*" /></Conditions>
-    </FilePathRule>
-    <FilePathRule Id="$([guid]::NewGuid().ToString())" Name="Permitir Program Files" Description="Permitir Program Files" UserOrGroupSid="S-1-1-0" Action="Allow">
-      <Conditions><FilePathCondition Path="%PROGRAMFILES%\*" /></Conditions>
-    </FilePathRule>
-    <FilePathRule Id="$([guid]::NewGuid().ToString())" Name="Permitir todo a Admin" Description="Admin" UserOrGroupSid="S-1-5-32-544" Action="Allow">
+
+    <!-- REGLA 1: Administradores tienen acceso total siempre -->
+    <FilePathRule Id="$(([guid]::NewGuid()).ToString())" Name="Permitir todo a Administradores" Description="Admin sin restricciones" UserOrGroupSid="$sidAdmins" Action="Allow">
       <Conditions><FilePathCondition Path="*" /></Conditions>
     </FilePathRule>
+
+    <!-- REGLA 2: Permitir Windows System a todos -->
+    <FilePathRule Id="$(([guid]::NewGuid()).ToString())" Name="Permitir WINDIR a todos" Description="Rutas del sistema" UserOrGroupSid="$sidEvery" Action="Allow">
+      <Conditions><FilePathCondition Path="%WINDIR%\*" /></Conditions>
+    </FilePathRule>
+
+    <!-- REGLA 3: Permitir Program Files a todos -->
+    <FilePathRule Id="$(([guid]::NewGuid()).ToString())" Name="Permitir ProgramFiles a todos" Description="Aplicaciones instaladas" UserOrGroupSid="$sidEvery" Action="Allow">
+      <Conditions><FilePathCondition Path="%PROGRAMFILES%\*" /></Conditions>
+    </FilePathRule>
+    <FilePathRule Id="$(([guid]::NewGuid()).ToString())" Name="Permitir ProgramFiles x86 a todos" Description="Aplicaciones instaladas x86" UserOrGroupSid="$sidEvery" Action="Allow">
+      <Conditions><FilePathCondition Path="%PROGRAMFILES(X86)%\*" /></Conditions>
+    </FilePathRule>
+
+    <!-- REGLA 4 (CLAVE): Allow EXPLICITO del notepad.exe para el grupo G_Cuates -->
+    <FilePathRule Id="$(([guid]::NewGuid()).ToString())" Name="Permitir Notepad a Cuates" Description="Cuates pueden usar Bloc de Notas" UserOrGroupSid="$sidCuates" Action="Allow">
+      <Conditions><FilePathCondition Path="%WINDIR%\System32\notepad.exe" /></Conditions>
+    </FilePathRule>
+
+    <!-- REGLA 5 (CLAVE): Deny por HASH del notepad.exe para G_NoCuates (anti-rename) -->
+    <FileHashRule Id="$(([guid]::NewGuid()).ToString())" Name="Bloquear Notepad a NoCuates por Hash" Description="Hash impide renombrar el exe" UserOrGroupSid="$sidNoCuates" Action="Deny">
+      <Conditions>
+        <FileHashCondition>
+          <FileHash Type="SHA256" Data="$hashData" SourceFileName="$hashFileName" SourceFileLength="$hashFileLength" />
+        </FileHashCondition>
+      </Conditions>
+    </FileHashRule>
+
   </RuleCollection>
   <RuleCollection Type="Appx" EnforcementMode="Enabled">
-    <FilePublisherRule Id="$([guid]::NewGuid().ToString())" Name="Permitir Appx" Description="Permitir Appx" UserOrGroupSid="S-1-1-0" Action="Allow">
+    <!-- Permitir TODAS las Appx a todos (Buscador, Menu Inicio, Calculadora, etc.) -->
+    <FilePublisherRule Id="$(([guid]::NewGuid()).ToString())" Name="Permitir todas las Appx" Description="Apps UWP permitidas" UserOrGroupSid="$sidEvery" Action="Allow">
       <Conditions>
         <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="*">
           <BinaryVersionRange LowSection="0.0.0.0" HighSection="*" />
@@ -197,39 +243,21 @@ function fn_setup_applocker {
   </RuleCollection>
 </AppLockerPolicy>
 "@
-    $tempFile = "$env:TEMP\default_policy.xml"
-    $xmlContent | Out-File -FilePath $tempFile -Encoding utf8
-    
-    Import-Module GroupPolicy
-    $dom = (Get-ADDomain).DistinguishedName
-    $netbios = (Get-ADDomain).NetBIOSName
-    $gpoName = "GPO_AppLocker_Clientes"
 
+    $tempFile = "$env:TEMP\applocker_completo.xml"
+    $fullXml | Out-File -FilePath $tempFile -Encoding utf8
+
+    # Recrear la GPO limpia
     if (Get-GPO -Name $gpoName -ErrorAction SilentlyContinue) {
         Remove-GPO -Name $gpoName -ErrorAction SilentlyContinue
     }
     $gpo = New-GPO -Name $gpoName
-    
     $ldapPath = "LDAP://CN={$($gpo.Id)},CN=Policies,CN=System,$dom"
-    
-    # 2. Inyectar las reglas por Defecto 
+
+    # Inyectar el XML completo de una sola vez (sin merge, sin conflictos)
     Set-AppLockerPolicy -XmlPolicy $tempFile -Ldap $ldapPath -ErrorAction Stop
-    
-    # 3. Construir la regla de Hash para el Notepad dinamicamente usando PowerShell nativo
-    $fileInfo = Get-AppLockerFileInformation -Path "C:\Windows\System32\notepad.exe"
-    $hashPolicyXml = New-AppLockerPolicy -RuleType Hash -User "$netbios\G_NoCuates" -FileInformation $fileInfo -Xml
-    
-    # 4. Cambiar la regla a Deny (ya que PowerShell no tiene parametro -Action para reglas nuevas)
-    $hashPolicyXml = $hashPolicyXml.Replace('Action="Allow"', 'Action="Deny"')
-    $hashPolicyXml = $hashPolicyXml.Replace('Name="', 'Name="Bloqueo ')
-    
-    $tempHashFile = "$env:TEMP\notepad_deny.xml"
-    $hashPolicyXml | Out-File -FilePath $tempHashFile -Encoding utf8
-    
-    # 5. Hacer Merge de la regla de Hash hacia la GPO existente
-    Set-AppLockerPolicy -XmlPolicy $tempHashFile -Ldap $ldapPath -Merge -ErrorAction Stop
-    
-    # Configurar el servicio AppIDSvc del cliente para inicio automatico mediante GPO
+
+    # Iniciar AppIDSvc automaticamente en los clientes via GPO
     Set-GPRegistryValue -Name $gpoName -Key "HKLM\SYSTEM\CurrentControlSet\Services\AppIDSvc" -ValueName "Start" -Type DWord -Value 2 | Out-Null
     
     # Crear OU Equipos_Cliente y redirigir los nuevos equipos alli
