@@ -63,66 +63,58 @@ function fn_setup_ad_structure {
     fn_ok "UOs y Grupos (G_Cuates, G_NoCuates) listos."
 }
 
-function Get-LogonHoursBytes {
-    # AD guarda logonHours en UTC. Calculamos el offset para convertir horas LOCALES a UTC.
-    param([int]$startLocal, [int]$endLocal)
-    $utcOffset = [int][System.TimeZoneInfo]::Local.GetUtcOffset([DateTime]::Now).TotalHours
-    $startUTC  = ($startLocal - $utcOffset + 24) % 24
-    $endUTC    = ($endLocal   - $utcOffset + 24) % 24
-    
-    $bytes = New-Object Byte[] 21
-    for ($d = 0; $d -lt 7; $d++) {
-        for ($h = 0; $h -lt 24; $h++) {
-            $isOk = if ($startUTC -lt $endUTC) {
-                $h -ge $startUTC -and $h -lt $endUTC
-            } else {
-                $h -ge $startUTC -or $h -lt $endUTC
-            }
-            if ($isOk) {
-                $bit = ($d * 24) + $h
-                $bytes[[Math]::Floor($bit/8)] = $bytes[[Math]::Floor($bit/8)] -bor (1 -shl ($bit % 8))
-            }
-        }
+# net user /times maneja horas LOCALES directamente, sin conversion UTC
+# Formato: ALL,HH:MM-HH:MM  (ALL = todos los dias de la semana)
+function Set-LogonHours {
+    param(
+        [string]$Username,
+        [string]$Tipo   # "Cuates" o "NoCuates"
+    )
+    if ($Tipo -eq "Cuates") {
+        # Cuates: 8:00 AM - 3:00 PM todos los dias
+        net user $Username /times:ALL,08:00-15:00 | Out-Null
+        fn_ok "  Horario Cuates aplicado a ${Username}: 08:00-15:00 (hora local)"
+    } else {
+        # NoCuates: 3:00 PM - 2:00 AM  (cruza medianoche -> dos rangos)
+        net user $Username /times:ALL,15:00-02:00 | Out-Null
+        fn_ok "  Horario NoCuates aplicado a ${Username}: 15:00-02:00 (hora local)"
     }
-    return $bytes
 }
+
 
 function fn_import_users_csv {
     $csv = "$ScriptDir\..\..\data\usuarios.csv"
     if (-not (Test-Path $csv)) { fn_err "No se encontro el archivo CSV en $csv"; return }
     
     $users = Import-Csv $csv
-    $hC = Get-LogonHoursBytes 8 15
-    $hN = Get-LogonHoursBytes 15 2
     $Domain = (Get-ADDomain).DistinguishedName
 
     foreach ($u in $users) {
-        $tipo = $u.Tipo.Trim()
-        $uoName = if ($tipo -eq "Cuates") { "Cuates" } else { "No Cuates" }
+        $tipo     = $u.Tipo.Trim()
+        $uoName   = if ($tipo -eq "Cuates") { "Cuates" } else { "No Cuates" }
         $grpIdentity = if ($tipo -eq "Cuates") { "G_Cuates" } else { "G_NoCuates" }
-        $hours = if ($tipo -eq "Cuates") { $hC } else { $hN }
 
+        # 1. Crear usuario si no existe
         if (-not (Get-ADUser -Filter "SamAccountName -eq '$($u.Username)'" -ErrorAction SilentlyContinue)) {
             $pass = ConvertTo-SecureString $u.Password -AsPlainText -Force
-            New-ADUser -Name $u.Nombre -SamAccountName $u.Username -AccountPassword $pass -Enabled $true -Path "OU=$uoName,$Domain"
+            New-ADUser -Name $u.Nombre -SamAccountName $u.Username `
+                       -AccountPassword $pass -Enabled $true `
+                       -Path "OU=$uoName,$Domain"
+            fn_ok "Usuario $($u.Username) creado en OU=$uoName."
         }
-        
-        # Usar ADSI nativo para asegurar que LogonHours se aplique sin fallas de schema de powershell
-        try {
-            $userDE = [ADSI]"LDAP://CN=$($u.Nombre),OU=$uoName,$Domain"
-            $userDE.Properties["logonHours"].Clear()
-            $userDE.Properties["logonHours"].Value = [byte[]]$hours
-            $userDE.CommitChanges()
-        } catch {}
-        
+
+        # 2. Aplicar horario con 'net user /times' (hora local, sin confusion UTC)
+        Set-LogonHours -Username $u.Username -Tipo $tipo
+
+        # 3. Agregar al grupo correspondiente
         Add-ADGroupMember -Identity $grpIdentity -Members $u.Username -ErrorAction SilentlyContinue
-        fn_ok "Usuario $($u.Username) ($tipo) - Configurado con exito."
     }
 
-    # Crear GPO para forzar el cierre de sesion al expirar Logon Hours
+    # 4. GPO para forzar cierre de sesion al vencer el horario
     Import-Module GroupPolicy
     $gpoNameLogon = "GPO_ForceLogoff_Horarios"
     if (Get-GPO -Name $gpoNameLogon -ErrorAction SilentlyContinue) { Remove-GPO -Name $gpoNameLogon -ErrorAction SilentlyContinue }
+
     New-GPO -Name $gpoNameLogon | Out-Null
     Set-GPRegistryValue -Name $gpoNameLogon -Key "HKLM\SYSTEM\CurrentControlSet\Services\LanManServer\Parameters" -ValueName "EnableForcedLogOff" -Type DWord -Value 1 | Out-Null
     Set-GPRegistryValue -Name $gpoNameLogon -Key "HKLM\Software\Microsoft\Windows NT\CurrentVersion\Winlogon" -ValueName "ForceLogoffWhenHourExpire" -Type String -Value "1" | Out-Null
