@@ -186,6 +186,15 @@ function fn_setup_applocker {
       <Conditions><FilePathCondition Path="*" /></Conditions>
     </FilePathRule>
   </RuleCollection>
+  <RuleCollection Type="Appx" EnforcementMode="Enabled">
+    <FilePublisherRule Id="$([guid]::NewGuid().ToString())" Name="Permitir Appx" Description="Permitir Appx" UserOrGroupSid="S-1-1-0" Action="Allow">
+      <Conditions>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="*">
+          <BinaryVersionRange LowSection="0.0.0.0" HighSection="*" />
+        </FilePublisherCondition>
+      </Conditions>
+    </FilePublisherRule>
+  </RuleCollection>
 </AppLockerPolicy>
 "@
     $tempFile = "$env:TEMP\default_policy.xml"
