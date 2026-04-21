@@ -143,11 +143,10 @@ function fn_setup_fsrm_and_shares {
 function fn_setup_applocker {
     fn_info "Configurando AppLocker a traves de GPO para los Clientes..."
     
-    # 1. Obtener datos reales para el XML
-    $hash = (Get-AppLockerFileInformation -Path "C:\Windows\System32\notepad.exe").FileHash.Data
-    $sid = (Get-ADGroup -Identity "G_NoCuates").SID.Value
-    
-    # 2. Creamos el archivo XML a mano (Esto nunca falla)
+    Set-Service AppIDSvc -StartupType Automatic -ErrorAction SilentlyContinue
+    Start-Service AppIDSvc -ErrorAction SilentlyContinue 
+
+    # 1. Reglas por Defecto (Seguras, construidas manualmente)
     $xmlContent = @"
 <AppLockerPolicy Version="1">
   <RuleCollection Type="Exe" EnforcementMode="Enabled">
@@ -160,23 +159,15 @@ function fn_setup_applocker {
     <FilePathRule Id="$([guid]::NewGuid().ToString())" Name="Permitir todo a Admin" Description="Admin" UserOrGroupSid="S-1-5-32-544" Action="Allow">
       <Conditions><FilePathCondition Path="*" /></Conditions>
     </FilePathRule>
-    <FileHashRule Id="$([guid]::NewGuid().ToString())" Name="Bloqueo Notepad NoCuates" Description="Bloqueo hash" UserOrGroupSid="$sid" Action="Deny">
-      <Conditions>
-        <FileHashCondition>
-          <FileHash Type="SHA256" Data="$hash" SourceFileName="notepad.exe" SourceFileLength="225280" />
-        </FileHashCondition>
-      </Conditions>
-    </FileHashRule>
   </RuleCollection>
 </AppLockerPolicy>
 "@
-
-    # 3. Guardar e Inyectar en una GPO en lugar de en la politica local del servidor
-    $tempFile = "$env:TEMP\final_policy.xml"
+    $tempFile = "$env:TEMP\default_policy.xml"
     $xmlContent | Out-File -FilePath $tempFile -Encoding utf8
     
     Import-Module GroupPolicy
     $dom = (Get-ADDomain).DistinguishedName
+    $netbios = (Get-ADDomain).NetBIOSName
     $gpoName = "GPO_AppLocker_Clientes"
 
     if (Get-GPO -Name $gpoName -ErrorAction SilentlyContinue) {
@@ -185,7 +176,16 @@ function fn_setup_applocker {
     $gpo = New-GPO -Name $gpoName
     
     $ldapPath = "LDAP://CN={$($gpo.Id)},CN=Policies,CN=System,$dom"
+    
+    # 2. Inyectar las reglas por Defecto 
     Set-AppLockerPolicy -XmlPolicy $tempFile -Ldap $ldapPath -ErrorAction Stop
+    
+    # 3. Construir la regla de Hash para el Notepad dinamicamente usando PowerShell nativo
+    $fileInfo = Get-AppLockerFileInformation -Path "C:\Windows\System32\notepad.exe"
+    $hashPolicy = New-AppLockerPolicy -RuleType Hash -User "$netbios\G_NoCuates" -Action Deny -FileInformation $fileInfo
+    
+    # 4. Hacer Merge de la regla de Hash hacia la GPO existente
+    Set-AppLockerPolicy -PolicyObject $hashPolicy -Ldap $ldapPath -Merge -ErrorAction Stop
     
     # Configurar el servicio AppIDSvc del cliente para inicio automatico mediante GPO
     Set-GPRegistryValue -Name $gpoName -Key "HKLM\SYSTEM\CurrentControlSet\Services\AppIDSvc" -ValueName "Start" -Type DWord -Value 2 | Out-Null
