@@ -64,11 +64,20 @@ function fn_setup_ad_structure {
 }
 
 function Get-LogonHoursBytes {
-    param([int]$start, [int]$end)
+    # AD guarda logonHours en UTC. Calculamos el offset para convertir horas LOCALES a UTC.
+    param([int]$startLocal, [int]$endLocal)
+    $utcOffset = [int][System.TimeZoneInfo]::Local.GetUtcOffset([DateTime]::Now).TotalHours
+    $startUTC  = ($startLocal - $utcOffset + 24) % 24
+    $endUTC    = ($endLocal   - $utcOffset + 24) % 24
+    
     $bytes = New-Object Byte[] 21
-    for ($d=0;$d -lt 7;$d++) {
-        for ($h=0;$h -lt 24;$h++) {
-            $isOk = if ($start -lt $end) { $h -ge $start -and $h -lt $end } else { $h -ge $start -or $h -lt $end }
+    for ($d = 0; $d -lt 7; $d++) {
+        for ($h = 0; $h -lt 24; $h++) {
+            $isOk = if ($startUTC -lt $endUTC) {
+                $h -ge $startUTC -and $h -lt $endUTC
+            } else {
+                $h -ge $startUTC -or $h -lt $endUTC
+            }
             if ($isOk) {
                 $bit = ($d * 24) + $h
                 $bytes[[Math]::Floor($bit/8)] = $bytes[[Math]::Floor($bit/8)] -bor (1 -shl ($bit % 8))
@@ -123,46 +132,54 @@ function fn_import_users_csv {
 
 # PASO 5: FSRM Y CARPETAS COMPARTIDAS
 function fn_setup_fsrm_and_shares {
-    fn_info "Configurando FSRM, Carpetas y Permisos SMB..."
+    fn_info "Configurando FSRM, Carpetas Compartidas y Permisos..."
     Import-Module FileServerResourceManager
 
-    $paths = @{ "Documentos_Cuates"="C:\Users\Public\Cuates_Docs"; "Documentos_NoCuates"="C:\Users\Public\NoCuates_Docs" }
-    foreach ($shareName in $paths.Keys) {
-        $fullPath = $paths[$shareName]
-        if (-not (Test-Path $fullPath)) { New-Item $fullPath -ItemType Directory -Force | Out-Null }
-        if (-not (Get-SmbShare -Name $shareName -ErrorAction SilentlyContinue)) {
-            New-SmbShare -Name $shareName -Path $fullPath -FullAccess "Everyone" -ErrorAction SilentlyContinue | Out-Null
+    # --- Definicion de carpetas y grupos ---
+    $shareDefs = @(
+        @{ Share="Cuates_Docs";   Path="C:\Shares\Cuates_Docs";   Group="G_Cuates";   QuotaMB=10 },
+        @{ Share="NoCuates_Docs"; Path="C:\Shares\NoCuates_Docs"; Group="G_NoCuates"; QuotaMB=5  }
+    )
+
+    foreach ($def in $shareDefs) {
+        # 1. Crear carpeta fisica
+        if (-not (Test-Path $def.Path)) {
+            New-Item $def.Path -ItemType Directory -Force | Out-Null
         }
-        # Permisos Estrictos por Grupo
-        icacls $fullPath /inheritance:r | Out-Null
-        $grp = if ($shareName -match "Cuates") { "G_Cuates" } else { "G_NoCuates" }
-        icacls $fullPath /grant "${grp}:(OI)(CI)F" /grant "Administrators:(OI)(CI)F" | Out-Null
+
+        # 2. Eliminar herencia NTFS y aplicar permisos estrictos por grupo
+        icacls $def.Path /inheritance:r /grant "Administrators:(OI)(CI)F" | Out-Null
+        icacls $def.Path /grant "$($def.Group):(OI)(CI)M" | Out-Null  # M = Modify (leer/escribir/borrar sus propios archivos)
+
+        # 3. Crear o actualizar el Share SMB con acceso total al grupo (el filtro lo hace NTFS)
+        $existing = Get-SmbShare -Name $def.Share -ErrorAction SilentlyContinue
+        if ($existing) { Remove-SmbShare -Name $def.Share -Force -ErrorAction SilentlyContinue }
+        New-SmbShare -Name $def.Share -Path $def.Path -FullAccess "Administrators" -ChangeAccess $def.Group | Out-Null
+        fn_ok "Share '\\$(hostname)\$($def.Share)' creado -> $($def.Group) tiene acceso Write."
+
+        # 4. Cuota Hard-Limit (la carpeta NO puede crecer mas alla del limite)
+        $quotaBytes = $def.QuotaMB * 1MB
+        $existing = Get-FsrmQuota -Path $def.Path -ErrorAction SilentlyContinue
+        if ($existing) { Remove-FsrmQuota -Path $def.Path -ErrorAction SilentlyContinue }
+        New-FsrmQuota -Path $def.Path -Size $quotaBytes -ErrorAction SilentlyContinue | Out-Null
+        fn_ok "Cuota de $($def.QuotaMB)MB aplicada sobre $($def.Path)."
     }
 
-    # Cuotas y Filtros
-    # Auto Quota aplica per-folder a carpetas de usuarios
-    if (-not (Get-FsrmQuotaTemplate -Name "Plantilla_Cuates" -ErrorAction SilentlyContinue)) {
-        New-FsrmQuotaTemplate -Name "Plantilla_Cuates" -Size 10MB -ErrorAction SilentlyContinue | Out-Null
-        New-FsrmQuotaTemplate -Name "Plantilla_NoCuates" -Size 5MB -ErrorAction SilentlyContinue | Out-Null
+    # 5. Grupo de archivos restringidos (FSRM File Group)
+    if (Get-FsrmFileGroup -Name "Restringidos_P8" -ErrorAction SilentlyContinue) {
+        Remove-FsrmFileGroup -Name "Restringidos_P8" -ErrorAction SilentlyContinue
     }
-    if (-not (Get-FsrmAutoQuota -Path "C:\Users\Public\Cuates_Docs" -ErrorAction SilentlyContinue)) {
-        New-FsrmAutoQuota -Path "C:\Users\Public\Cuates_Docs" -Template "Plantilla_Cuates" -ErrorAction SilentlyContinue | Out-Null
-        New-FsrmAutoQuota -Path "C:\Users\Public\NoCuates_Docs" -Template "Plantilla_NoCuates" -ErrorAction SilentlyContinue | Out-Null
-    }
-    # Aseguramos un limite general a los shares tambien
-    if (-not (Get-FsrmQuota -Path "C:\Users\Public\Cuates_Docs" -ErrorAction SilentlyContinue)) {
-        New-FsrmQuota -Path "C:\Users\Public\Cuates_Docs" -Size 10MB -ErrorAction SilentlyContinue | Out-Null
-        New-FsrmQuota -Path "C:\Users\Public\NoCuates_Docs" -Size 5MB -ErrorAction SilentlyContinue | Out-Null
+    New-FsrmFileGroup -Name "Restringidos_P8" -IncludePattern @("*.mp3","*.mp4","*.exe","*.msi") | Out-Null
+
+    # 6. Apantallamiento ACTIVO en cada carpeta (bloquea escritura de archivos restringidos)
+    foreach ($def in $shareDefs) {
+        $existing = Get-FsrmFileScreen -Path $def.Path -ErrorAction SilentlyContinue
+        if ($existing) { Remove-FsrmFileScreen -Path $def.Path -ErrorAction SilentlyContinue }
+        New-FsrmFileScreen -Path $def.Path -IncludeGroup "Restringidos_P8" -Active | Out-Null
+        fn_ok "Apantallamiento ACTIVO en $($def.Path): bloquea .mp3 .mp4 .exe .msi"
     }
 
-    if (-not (Get-FsrmFileGroup -Name "Restringidos_P8" -ErrorAction SilentlyContinue)) {
-        New-FsrmFileGroup -Name "Restringidos_P8" -IncludePattern @("*.mp3", "*.mp4", "*.exe", "*.msi") | Out-Null
-    }
-    if (-not (Get-FsrmFileScreen -Path "C:\Users\Public\Cuates_Docs" -ErrorAction SilentlyContinue)) {
-        New-FsrmFileScreen -Path "C:\Users\Public\Cuates_Docs" -IncludeGroup "Restringidos_P8" -Active | Out-Null
-        New-FsrmFileScreen -Path "C:\Users\Public\NoCuates_Docs" -IncludeGroup "Restringidos_P8" -Active | Out-Null
-    }
-    fn_ok "Servidor de Archivos (FSRM) cuotas por usuario y apantallamiento activo."
+    fn_ok "FSRM completo. Accede desde el cliente con: \\\\<IP_SERVIDOR>\\Cuates_Docs  o  \\\\<IP_SERVIDOR>\\NoCuates_Docs"
 }
 
 # PASO 6: APPLOCKER (HASH)
