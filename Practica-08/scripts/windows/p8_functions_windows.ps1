@@ -64,9 +64,9 @@ function fn_setup_ad_structure {
 function Get-LogonHoursUTC {
     param([int]$StartHourLocal, [int]$EndHourLocal)
 
-    $offset  = [System.TimeZoneInfo]::Local.GetUtcOffset([DateTime]::Now).TotalHours
-    $startUTC = (($StartHourLocal - $offset) % 24 + 24) % 24
-    $endUTC   = (($EndHourLocal   - $offset) % 24 + 24) % 24
+    $offset   = [System.TimeZoneInfo]::Local.GetUtcOffset([DateTime]::Now).TotalHours
+    $startUTC = [int]((($StartHourLocal - $offset) % 24 + 24) % 24)
+    $endUTC   = [int]((($EndHourLocal   - $offset) % 24 + 24) % 24)
 
     $bytes = New-Object byte[] 21
     for ($day = 0; $day -lt 7; $day++) {
@@ -74,15 +74,17 @@ function Get-LogonHoursUTC {
             $allowed = if ($startUTC -le $endUTC) {
                 $h -ge $startUTC -and $h -lt $endUTC
             } else {
-                $h -ge $startUTC -or  $h -lt $endUTC
+                $h -ge $startUTC -or $h -lt $endUTC
             }
             if ($allowed) {
-                $bit = $day * 24 + $h
-                $bytes[$bit / 8] = $bytes[$bit / 8] -bor (1 -shl ($bit % 8))
+                $bit   = [int]($day * 24 + $h)
+                $idx   = [int][Math]::Floor($bit / 8)
+                $shift = [int]($bit % 8)
+                $bytes[$idx] = [byte]($bytes[$idx] -bor (1 -shl $shift))
             }
         }
     }
-    return ,$bytes   # la coma fuerza retorno como array, no como valor escalar
+    return ,$bytes
 }
 
 # ─── PASO 4b: IMPORTAR USUARIOS + HORARIOS ──────────────────────────────────
