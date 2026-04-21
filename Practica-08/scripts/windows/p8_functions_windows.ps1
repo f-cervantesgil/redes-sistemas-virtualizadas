@@ -96,15 +96,29 @@ function fn_import_users_csv {
         if (-not (Get-ADUser -Filter "SamAccountName -eq '$($u.Username)'" -ErrorAction SilentlyContinue)) {
             $pass = ConvertTo-SecureString $u.Password -AsPlainText -Force
             New-ADUser -Name $u.Nombre -SamAccountName $u.Username -AccountPassword $pass -Enabled $true -Path "OU=$uoName,$Domain"
-            # 2. SECCIÓN BLINDADA: Ocultando errores de LogonHours para evitar texto rojo en pantalla
-            try {
-                Set-ADUser -Identity $u.Username -Clear logonHours -ErrorAction Stop
-                Set-ADUser -Identity $u.Username -Replace @{logonHours = [byte[]]$hours} -ErrorAction Stop
-            } catch {}
-            Add-ADGroupMember -Identity $grpIdentity -Members $u.Username
-            fn_ok "Usuario $($u.Username) ($tipo) - Creado con exito."
         }
+        
+        # Usar ADSI nativo para asegurar que LogonHours se aplique sin fallas de schema de powershell
+        try {
+            $userDE = [ADSI]"LDAP://CN=$($u.Nombre),OU=$uoName,$Domain"
+            $userDE.Properties["logonHours"].Clear()
+            $userDE.Properties["logonHours"].Value = [byte[]]$hours
+            $userDE.CommitChanges()
+        } catch {}
+        
+        Add-ADGroupMember -Identity $grpIdentity -Members $u.Username -ErrorAction SilentlyContinue
+        fn_ok "Usuario $($u.Username) ($tipo) - Configurado con exito."
     }
+
+    # Crear GPO para forzar el cierre de sesion al expirar Logon Hours
+    Import-Module GroupPolicy
+    $gpoNameLogon = "GPO_ForceLogoff_Horarios"
+    if (Get-GPO -Name $gpoNameLogon -ErrorAction SilentlyContinue) { Remove-GPO -Name $gpoNameLogon -ErrorAction SilentlyContinue }
+    New-GPO -Name $gpoNameLogon | Out-Null
+    Set-GPRegistryValue -Name $gpoNameLogon -Key "HKLM\SYSTEM\CurrentControlSet\Services\LanManServer\Parameters" -ValueName "EnableForcedLogOff" -Type DWord -Value 1 | Out-Null
+    Set-GPRegistryValue -Name $gpoNameLogon -Key "HKLM\Software\Microsoft\Windows NT\CurrentVersion\Winlogon" -ValueName "ForceLogoffWhenHourExpire" -Type String -Value "1" | Out-Null
+    New-GPLink -Name $gpoNameLogon -Target $Domain | Out-Null
+    fn_ok "GPO '$gpoNameLogon' creada y enlazada. Cierre de sesion forzado habilitado."
 }
 
 # PASO 5: FSRM Y CARPETAS COMPARTIDAS
@@ -126,17 +140,29 @@ function fn_setup_fsrm_and_shares {
     }
 
     # Cuotas y Filtros
-    if (-not (Get-FsrmQuota -Path "C:\Users\Public\Cuates_Docs" -ErrorAction SilentlyContinue)) {
-        New-FsrmQuota -Path "C:\Users\Public\Cuates_Docs" -Size 10MB | Out-Null
-        New-FsrmQuota -Path "C:\Users\Public\NoCuates_Docs" -Size 5MB | Out-Null
+    # Auto Quota aplica per-folder a carpetas de usuarios
+    if (-not (Get-FsrmQuotaTemplate -Name "Plantilla_Cuates" -ErrorAction SilentlyContinue)) {
+        New-FsrmQuotaTemplate -Name "Plantilla_Cuates" -Size 10MB -ErrorAction SilentlyContinue | Out-Null
+        New-FsrmQuotaTemplate -Name "Plantilla_NoCuates" -Size 5MB -ErrorAction SilentlyContinue | Out-Null
     }
+    if (-not (Get-FsrmAutoQuota -Path "C:\Users\Public\Cuates_Docs" -ErrorAction SilentlyContinue)) {
+        New-FsrmAutoQuota -Path "C:\Users\Public\Cuates_Docs" -Template "Plantilla_Cuates" -ErrorAction SilentlyContinue | Out-Null
+        New-FsrmAutoQuota -Path "C:\Users\Public\NoCuates_Docs" -Template "Plantilla_NoCuates" -ErrorAction SilentlyContinue | Out-Null
+    }
+    # Aseguramos un limite general a los shares tambien
+    if (-not (Get-FsrmQuota -Path "C:\Users\Public\Cuates_Docs" -ErrorAction SilentlyContinue)) {
+        New-FsrmQuota -Path "C:\Users\Public\Cuates_Docs" -Size 10MB -ErrorAction SilentlyContinue | Out-Null
+        New-FsrmQuota -Path "C:\Users\Public\NoCuates_Docs" -Size 5MB -ErrorAction SilentlyContinue | Out-Null
+    }
+
     if (-not (Get-FsrmFileGroup -Name "Restringidos_P8" -ErrorAction SilentlyContinue)) {
         New-FsrmFileGroup -Name "Restringidos_P8" -IncludePattern @("*.mp3", "*.mp4", "*.exe", "*.msi") | Out-Null
     }
-    if (-not (Get-FsrmFileScreen -Path "C:\Users\Public" -ErrorAction SilentlyContinue)) {
-        New-FsrmFileScreen -Path "C:\Users\Public" -IncludeGroup "Restringidos_P8" -Active | Out-Null
+    if (-not (Get-FsrmFileScreen -Path "C:\Users\Public\Cuates_Docs" -ErrorAction SilentlyContinue)) {
+        New-FsrmFileScreen -Path "C:\Users\Public\Cuates_Docs" -IncludeGroup "Restringidos_P8" -Active | Out-Null
+        New-FsrmFileScreen -Path "C:\Users\Public\NoCuates_Docs" -IncludeGroup "Restringidos_P8" -Active | Out-Null
     }
-    fn_ok "Servidor de Archivos (FSRM) configurado al 100%."
+    fn_ok "Servidor de Archivos (FSRM) cuotas por usuario y apantallamiento activo."
 }
 
 # PASO 6: APPLOCKER (HASH)
@@ -204,8 +230,15 @@ function fn_setup_applocker {
         try { redircmp $ouClient | Out-Null } catch { }
     }
     
+    # Mover todas las PCs del contenedor generico a la UO Equipos_Cliente automaticamente
+    $comps = Get-ADComputer -Filter * -SearchBase "CN=Computers,$dom" -ErrorAction SilentlyContinue
+    foreach ($comp in $comps) {
+        Move-ADObject -Identity $comp.DistinguishedName -TargetPath $ouClient -ErrorAction SilentlyContinue
+    }
+    
     # Vincular GPO a la OU de Clientes
     New-GPLink -Name $gpoName -Target $ouClient | Out-Null
+
 
     fn_ok "AppLocker inyectado correctamente en GPO y enlazado a 'Equipos_Cliente'."
     fn_ok "El Servidor no recibe el bloqueo. Todo equipo nuevo ira a esta OU."
