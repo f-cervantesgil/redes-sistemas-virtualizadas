@@ -182,10 +182,17 @@ function fn_setup_applocker {
     
     # 3. Construir la regla de Hash para el Notepad dinamicamente usando PowerShell nativo
     $fileInfo = Get-AppLockerFileInformation -Path "C:\Windows\System32\notepad.exe"
-    $hashPolicy = New-AppLockerPolicy -RuleType Hash -User "$netbios\G_NoCuates" -Action Deny -FileInformation $fileInfo
+    $hashPolicyXml = New-AppLockerPolicy -RuleType Hash -User "$netbios\G_NoCuates" -FileInformation $fileInfo -Xml
     
-    # 4. Hacer Merge de la regla de Hash hacia la GPO existente
-    Set-AppLockerPolicy -PolicyObject $hashPolicy -Ldap $ldapPath -Merge -ErrorAction Stop
+    # 4. Cambiar la regla a Deny (ya que PowerShell no tiene parametro -Action para reglas nuevas)
+    $hashPolicyXml = $hashPolicyXml.Replace('Action="Allow"', 'Action="Deny"')
+    $hashPolicyXml = $hashPolicyXml.Replace('Name="', 'Name="Bloqueo ')
+    
+    $tempHashFile = "$env:TEMP\notepad_deny.xml"
+    $hashPolicyXml | Out-File -FilePath $tempHashFile -Encoding utf8
+    
+    # 5. Hacer Merge de la regla de Hash hacia la GPO existente
+    Set-AppLockerPolicy -XmlPolicy $tempHashFile -Ldap $ldapPath -Merge -ErrorAction Stop
     
     # Configurar el servicio AppIDSvc del cliente para inicio automatico mediante GPO
     Set-GPRegistryValue -Name $gpoName -Key "HKLM\SYSTEM\CurrentControlSet\Services\AppIDSvc" -ValueName "Start" -Type DWord -Value 2 | Out-Null
