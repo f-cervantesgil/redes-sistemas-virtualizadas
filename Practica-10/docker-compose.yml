@@ -1,6 +1,10 @@
 version: '3.8'
 
 services:
+
+  # ─────────────────────────────────────────────
+  #  SERVIDOR WEB  (Nginx en Alpine - imagen personalizada)
+  # ─────────────────────────────────────────────
   web:
     build:
       context: ./web
@@ -9,15 +13,17 @@ services:
     ports:
       - "80:8080"
     networks:
-      - infra_red
+      infra_red:
+        ipv4_address: 172.20.0.10
     volumes:
       - web_content:/usr/share/nginx/html
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 512M
+    mem_limit: 512m
+    cpus: 0.5
+    restart: unless-stopped
 
+  # ─────────────────────────────────────────────
+  #  BASE DE DATOS  (PostgreSQL 15 en Alpine)
+  # ─────────────────────────────────────────────
   db:
     image: postgres:15-alpine
     container_name: postgres_db
@@ -26,15 +32,17 @@ services:
       POSTGRES_PASSWORD: secretpassword
       POSTGRES_DB: userdb
     networks:
-      - infra_red
+      infra_red:
+        ipv4_address: 172.20.0.20
     volumes:
       - db_data:/var/lib/postgresql/data
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 512M
+    mem_limit: 512m
+    cpus: 0.5
+    restart: unless-stopped
 
+  # ─────────────────────────────────────────────
+  #  RESPALDO AUTOMÁTICO  (pg_dump cada 24 h)
+  # ─────────────────────────────────────────────
   db_backup:
     image: postgres:15-alpine
     container_name: postgres_backup
@@ -47,16 +55,24 @@ services:
       - ./db_backups:/backups
     networks:
       - infra_red
-    # Script que genera un respaldo automáticamente cada 24 horas (86400 segundos)
-    entrypoint: |
-      sh -c 'while true; do
-        echo "Generando respaldo automatizado...";
-        pg_dump -h db -U admin -F c -f /backups/backup_$$(date +%Y%m%d_%H%M%S).dump userdb;
-        sleep 86400;
-      done'
+    entrypoint: >
+      sh -c '
+        echo "Esperando que la BD esté lista...";
+        sleep 10;
+        while true; do
+          echo "Generando respaldo: $$(date +%Y-%m-%d_%H-%M-%S)";
+          pg_dump -h db -U admin -F c -f /backups/backup_$$(date +%Y%m%d_%H%M%S).dump userdb
+            && echo "✔ Respaldo completado" || echo "✖ Fallo en respaldo";
+          sleep 86400;
+        done'
     depends_on:
       - db
+    mem_limit: 256m
+    cpus: 0.3
 
+  # ─────────────────────────────────────────────
+  #  SERVIDOR FTP  (vsftpd - comparte web_content)
+  # ─────────────────────────────────────────────
   ftp:
     image: fauria/vsftpd
     container_name: ftp_server
@@ -64,29 +80,41 @@ services:
       FTP_USER: administrador
       FTP_PASS: admin123
       PASV_ADDRESS: 127.0.0.1
+      PASV_MIN_PORT: 21100
+      PASV_MAX_PORT: 21110
     ports:
       - "20:20"
       - "21:21"
       - "21100-21110:21100-21110"
     networks:
-      - infra_red
+      infra_red:
+        ipv4_address: 172.20.0.30
     volumes:
-      # Se mapea el volumen web_content a la carpeta FTP para compartir los archivos
+      # El volumen compartido permite que los archivos subidos por FTP
+      # sean visibles inmediatamente en el servidor web
       - web_content:/home/vsftpd/administrador
-    deploy:
-      resources:
-        limits:
-          cpus: '0.3'
-          memory: 256M
+    mem_limit: 256m
+    cpus: 0.3
+    restart: unless-stopped
 
+# ─────────────────────────────────────────────
+#  RED PERSONALIZADA  (bridge 172.20.0.0/16)
+# ─────────────────────────────────────────────
 networks:
   infra_red:
     name: infra_red
     driver: bridge
     ipam:
+      driver: default
       config:
         - subnet: 172.20.0.0/16
+          gateway: 172.20.0.1
 
+# ─────────────────────────────────────────────
+#  VOLÚMENES PERSISTENTES
+# ─────────────────────────────────────────────
 volumes:
   db_data:
+    name: db_data
   web_content:
+    name: web_content

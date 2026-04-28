@@ -1,48 +1,100 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Servidor Web Seguro - Práctica 10</title>
-    <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #1e1e2f;
-            color: #ffffff;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            height: 100vh;
-            margin: 0;
-        }
-        .container {
-            background-color: #2a2a40;
-            padding: 3rem;
-            border-radius: 10px;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
-            text-align: center;
-        }
-        h1 { color: #00d2ff; }
-        p { font-size: 1.2rem; }
-        .badge {
-            background-color: #00d2ff;
-            color: #000;
-            padding: 5px 15px;
-            border-radius: 20px;
-            font-weight: bold;
-            margin-top: 15px;
-            display: inline-block;
-        }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Servidor web contenerizado con Nginx en Alpine Linux. Práctica 10 - Migración de servicios esenciales a contenedores con enfoque en seguridad y almacenamiento.">
+  <title>Práctica 10 — Infraestructura Contenerizada</title>
+  <!-- Recurso estático externo: hoja de estilos CSS -->
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div class="container">
-        <h1>Servidor Web Contenerizado</h1>
-        <p>Práctica 10 - Migración y Seguridad</p>
-        <p>Este servidor se ejecuta como un usuario no administrativo.</p>
-        <p>Las firmas del servidor (Server Tokens) están deshabilitadas.</p>
-        <div class="badge">Nginx on Alpine Linux</div>
+
+  <!-- Recurso estático externo: imagen banner -->
+  <div class="banner">
+    <img src="banner.png" alt="Banner de infraestructura contenerizada">
+  </div>
+
+  <!-- Tarjeta principal -->
+  <div class="card">
+    <h1>Infraestructura Contenerizada</h1>
+    <p class="subtitle">Práctica 10 — Migración de Servicios Esenciales · Redes y Sistemas Virtualizados</p>
+
+    <h2>Estado de Servicios</h2>
+    <div class="status-grid">
+      <div class="status-item">
+        <span class="dot green"></span>
+        <div>
+          <div class="label">Servidor Web</div>
+          <div class="value">Nginx · Alpine</div>
+        </div>
+      </div>
+      <div class="status-item">
+        <span class="dot green"></span>
+        <div>
+          <div class="label">Base de Datos</div>
+          <div class="value">PostgreSQL 15</div>
+        </div>
+      </div>
+      <div class="status-item">
+        <span class="dot yellow"></span>
+        <div>
+          <div class="label">Servidor FTP</div>
+          <div class="value">vsftpd · Puerto 21</div>
+        </div>
+      </div>
+      <div class="status-item">
+        <span class="dot blue"></span>
+        <div>
+          <div class="label">Red Personalizada</div>
+          <div class="value">172.20.0.0/16</div>
+        </div>
+      </div>
     </div>
+
+    <div class="badges">
+      <span class="badge cyan">🔒 Server Tokens OFF</span>
+      <span class="badge green">👤 Usuario no-root</span>
+      <span class="badge yellow">💾 Volúmenes Persistentes</span>
+      <span class="badge cyan">🐳 Docker Alpine</span>
+    </div>
+  </div>
+
+  <!-- Tarjeta: Configuración de seguridad -->
+  <div class="card">
+    <h2>Configuración de Seguridad Aplicada</h2>
+    <div class="code-block">server_tokens off;          # Oculta versión de Nginx
+USER nginx;                 # Proceso sin privilegios root
+EXPOSE 8080;                # Puerto no privilegiado
+Red: infra_red (bridge)     # Segmento 172.20.0.0/16
+Memoria: 512 MB máx         # Límite de recursos activo
+CPU: 0.5 cores máx          # Restricción de procesador</div>
+  </div>
+
+  <!-- Tarjeta: Volúmenes -->
+  <div class="card">
+    <h2>Volúmenes Docker Persistentes</h2>
+    <div class="status-grid">
+      <div class="status-item">
+        <span class="dot green"></span>
+        <div>
+          <div class="label">web_content</div>
+          <div class="value">/usr/share/nginx/html</div>
+        </div>
+      </div>
+      <div class="status-item">
+        <span class="dot green"></span>
+        <div>
+          <div class="label">db_data</div>
+          <div class="value">/var/lib/postgresql/data</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    Práctica 10 · Nginx/Alpine · Server Tokens Deshabilitados · Usuario no-administrativo
+  </footer>
+
 </body>
 </html>
