@@ -1,0 +1,70 @@
+version: '3.8'
+
+services:
+  # 1. Balanceador de carga y frontend
+  nginx:
+    image: nginx:alpine
+    container_name: proxy_nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - red_publica
+    restart: always
+
+  # 2. Servidor de aplicaciones secundario (Solo accesible a traves de nginx)
+  webapp:
+    image: httpd:alpine
+    container_name: web_secundario
+    # No tiene "ports", por lo que esta aislado del host, solo expuesto en la red de docker
+    networks:
+      - red_publica
+    restart: always
+
+  # 3. Clúster de Base de Datos (PostgreSQL)
+  postgres_db:
+    image: postgres:15-alpine
+    container_name: servidor_db
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    networks:
+      - red_datos
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 4. Panel Administrativo (pgAdmin)
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: servidor_pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD}
+    ports:
+      # Al vincularlo a 127.0.0.1 obligamos a que solo se pueda acceder desde el mismo servidor Linux.
+      # Esto fuerza el uso de un túnel SSH para poder verlo desde el exterior.
+      - "127.0.0.1:${PGADMIN_PORT}:80"
+    networks:
+      - red_datos
+    restart: always
+    depends_on:
+      postgres_db:
+        condition: service_healthy
+
+networks:
+  red_publica:
+    driver: bridge
+  red_datos:
+    driver: bridge
+    internal: true # Aislamiento total del exterior
+
+volumes:
+  db_data:
