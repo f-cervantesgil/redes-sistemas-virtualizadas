@@ -115,7 +115,7 @@ El paso maestro. Te conectarás al panel oculto a través de SSH.
 2. Una vez que inicies sesión en la terminal de forma exitosa, NO la cierres. Minimízala.
 3. Abre tu navegador web en Windows y entra a: `http://localhost:8080`
 4. **Resultado Esperado**: Te cargará la interfaz gráfica de **pgAdmin 4**.
-   *(Puedes iniciar sesión con `admin@empresa.local` y contraseña `AdminPgSecure2026!` que definimos en el .env).* *Toma captura*.
+   *(Puedes iniciar sesión con `admin@empresa.com` y contraseña `AdminPgSecure2026!` que definimos en el .env).* *Toma captura*.
 
 ### Prueba 11.4: Validación de Persistencia y Buen Funcionamiento
 Demuestra que los volúmenes funcionan y que el orden de arranque está asegurado por el `healthcheck`.
