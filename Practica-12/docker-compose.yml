@@ -21,7 +21,7 @@ services:
       - mail_data:/var/mail             # Buzones de correo (persistentes)
       - mail_state:/var/mail-state      # Estado interno de Postfix/Dovecot
       - mail_logs:/var/log/mail         # Registros de auditoría
-      - ./config/:/tmp/docker-mailserver/:ro   # Configuración del servidor
+      - ./config/:/tmp/docker-mailserver/      # Configuración del servidor (escritura necesaria para cuentas)
     cap_add:
       - NET_ADMIN   # Necesario para que Fail2ban pueda modificar iptables
       - SYS_PTRACE  # Necesario para monitoreo de procesos internos
