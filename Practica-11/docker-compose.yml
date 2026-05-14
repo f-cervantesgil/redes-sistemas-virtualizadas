@@ -51,7 +51,7 @@ services:
     ports:
       # Al vincularlo a 127.0.0.1 obligamos a que solo se pueda acceder desde el mismo servidor Linux.
       # Esto fuerza el uso de un túnel SSH para poder verlo desde el exterior.
-      - "127.0.0.1:${PGADMIN_PORT}:80"
+      - "127.0.0.1:8080:80"
     networks:
       - red_datos
     restart: always
