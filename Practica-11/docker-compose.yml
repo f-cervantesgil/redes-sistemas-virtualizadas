@@ -49,9 +49,9 @@ services:
       PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL}
       PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD}
     ports:
-      # Al vincularlo a 127.0.0.1 obligamos a que solo se pueda acceder desde el mismo servidor Linux.
-      # Esto fuerza el uso de un túnel SSH para poder verlo desde el exterior.
-      - "127.0.0.1:8080:80"
+      # Puerto expuesto en todas las interfaces. El firewall del servidor bloquea el acceso
+      # externo, por lo que el túnel SSH sigue siendo necesario para acceder desde Windows.
+      - "0.0.0.0:8080:80"
     networks:
       - red_datos
     restart: always
