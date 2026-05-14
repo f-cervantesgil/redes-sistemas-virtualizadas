@@ -1,0 +1,84 @@
+version: '3.8'
+
+services:
+  # ================================================================
+  # SERVIDOR DE CORREO: Postfix + Dovecot + Rspamd + Fail2ban + OpenDKIM
+  # Una sola imagen oficial que integra todo el stack de correo.
+  # Proyecto: https://github.com/docker-mailserver/docker-mailserver
+  # ================================================================
+  mailserver:
+    image: ghcr.io/docker-mailserver/docker-mailserver:latest
+    container_name: servidor_correo
+    hostname: mail
+    domainname: reprobados.com
+    env_file: .env
+    ports:
+      - "25:25"       # SMTP  - Recepción de correo entre servidores MTA
+      - "465:465"     # SMTPS - SMTP cifrado SSL/TLS directo
+      - "587:587"     # Submission - Envío desde clientes (STARTTLS obligatorio)
+      - "993:993"     # IMAPS - Lectura cifrada de buzones (SSL)
+    volumes:
+      - mail_data:/var/mail             # Buzones de correo (persistentes)
+      - mail_state:/var/mail-state      # Estado interno de Postfix/Dovecot
+      - mail_logs:/var/log/mail         # Registros de auditoría
+      - ./config/:/tmp/docker-mailserver/:ro   # Configuración del servidor
+    cap_add:
+      - NET_ADMIN   # Necesario para que Fail2ban pueda modificar iptables
+      - SYS_PTRACE  # Necesario para monitoreo de procesos internos
+    restart: always
+    stop_grace_period: 1m
+    networks:
+      - red_correo
+
+  # ================================================================
+  # PORTAL WEBMAIL: Roundcube
+  # Interfaz web moderna (similar a Gmail) para gestionar el correo
+  # desde cualquier navegador sin instalar software adicional.
+  # ================================================================
+  roundcube:
+    image: roundcube/roundcubemail:latest
+    container_name: portal_webmail
+    ports:
+      - "8090:80"    # Acceso web: http://IP_SERVIDOR:8090
+    environment:
+      # -- Conexión al servidor IMAP para leer correos --
+      ROUNDCUBEMAIL_DEFAULT_HOST: "ssl://mailserver"
+      ROUNDCUBEMAIL_DEFAULT_PORT: 993
+      # -- Conexión al servidor SMTP para enviar correos --
+      ROUNDCUBEMAIL_SMTP_SERVER: "tls://mailserver"
+      ROUNDCUBEMAIL_SMTP_PORT: 587
+      # -- Base de datos interna del portal --
+      ROUNDCUBEMAIL_DB_TYPE: sqlite
+      # -- Interfaz moderna y responsiva --
+      ROUNDCUBEMAIL_SKIN: elastic
+      # -- Dominio por defecto en el login (usuario solo escribe "director") --
+      ROUNDCUBEMAIL_USERNAME_DOMAIN: reprobados.com
+      # -- Plugins activados --
+      ROUNDCUBEMAIL_PLUGINS: archive,zipdownload
+      # -- Tiempo de sesión: cierre automático tras inactividad (segundos) --
+      ROUNDCUBEMAIL_SESSION_LIFETIME: 1800
+    volumes:
+      - roundcube_db:/var/roundcube/db           # Preferencias y contactos (persistentes)
+      - roundcube_config:/var/roundcube/config   # Configuración del portal
+    depends_on:
+      - mailserver
+    restart: always
+    networks:
+      - red_correo
+
+# ================================================================
+# REDES
+# ================================================================
+networks:
+  red_correo:
+    driver: bridge   # Red bridge para comunicación interna entre contenedores
+
+# ================================================================
+# VOLÚMENES PERSISTENTES
+# ================================================================
+volumes:
+  mail_data:         # Buzones de todos los usuarios
+  mail_state:        # Estado interno del servidor de correo
+  mail_logs:         # Registros de auditoría (mail.log)
+  roundcube_db:      # Base de datos de preferencias del webmail
+  roundcube_config:  # Configuración persistente del portal
