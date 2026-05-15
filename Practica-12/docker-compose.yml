@@ -28,7 +28,9 @@ services:
     restart: always
     stop_grace_period: 1m
     networks:
-      - red_correo
+      red_correo:
+        aliases:
+          - mail.reprobados.com
 
   # ================================================================
   # PORTAL WEBMAIL: Roundcube
@@ -42,10 +44,10 @@ services:
       - "8090:80"    # Acceso web: http://IP_SERVIDOR:8090
     environment:
       # -- Conexión al servidor IMAP para leer correos --
-      ROUNDCUBEMAIL_DEFAULT_HOST: "ssl://mailserver"
+      ROUNDCUBEMAIL_DEFAULT_HOST: "ssl://mail.reprobados.com"
       ROUNDCUBEMAIL_DEFAULT_PORT: 993
       # -- Conexión al servidor SMTP para enviar correos --
-      ROUNDCUBEMAIL_SMTP_SERVER: "tls://mailserver"
+      ROUNDCUBEMAIL_SMTP_SERVER: "tls://mail.reprobados.com"
       ROUNDCUBEMAIL_SMTP_PORT: 587
       # -- Base de datos interna del portal --
       ROUNDCUBEMAIL_DB_TYPE: sqlite
