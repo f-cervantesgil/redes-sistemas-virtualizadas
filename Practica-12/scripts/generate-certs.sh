@@ -1,16 +1,17 @@
 #!/bin/bash
 # ================================================================
 # Script de Generación de Certificados TLS - Práctica 12
-# Genera los certificados autofirmados necesarios para el
-# servidor de correo (Postfix + Dovecot) antes de arrancar.
-#
-# USO: chmod +x scripts/generate-certs.sh && ./scripts/generate-certs.sh
 # ================================================================
+
+# Magia para asegurarnos de que siempre trabajamos en la carpeta correcta (Practica-12)
+# sin importar si lo ejecutas desde adentro de scripts/ o desde afuera.
+PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$PROJECT_ROOT" || exit 1
 
 DOMAIN="reprobados.com"
 HOSTNAME="mail"
 FQDN="${HOSTNAME}.${DOMAIN}"
-SSL_DIR="./config/ssl"
+SSL_DIR="config/ssl"
 CA_DIR="${SSL_DIR}/demoCA"
 DAYS=3650   # Válidos por 10 años
 
@@ -21,71 +22,30 @@ NC='\033[0m'
 
 echo "================================================================"
 echo -e "${AZUL}  Generador de Certificados TLS - Servidor de Correo${NC}"
-echo -e "${AZUL}  Dominio: ${FQDN}${NC}"
+echo -e "${AZUL}  Directorio base: ${PROJECT_ROOT}${NC}"
 echo "================================================================"
-echo ""
 
-# --- PASO 1: Crear estructura de directorios ---
-echo -e "${AMARILLO}[1/5] Creando estructura de directorios...${NC}"
+# Limpiar errores de ejecuciones previas (como la carpeta en lugares equivocados)
+rm -rf "$SSL_DIR" scripts/config
+
+echo -e "${AMARILLO}[1/4] Creando estructura de directorios...${NC}"
 mkdir -p "$CA_DIR"
-echo -e "${VERDE}      ✓ Directorio ${SSL_DIR} creado${NC}"
 
-# --- PASO 2: Generar clave privada de la CA ---
-echo ""
-echo -e "${AMARILLO}[2/5] Generando clave privada de la Autoridad Certificadora (CA)...${NC}"
+echo -e "${AMARILLO}[2/4] Generando CA (Autoridad Certificadora)...${NC}"
 openssl genrsa -out "${CA_DIR}/cakey.pem" 2048 2>/dev/null
-echo -e "${VERDE}      ✓ Clave de CA generada: ${CA_DIR}/cakey.pem${NC}"
+openssl req -new -x509 -days ${DAYS} -key "${CA_DIR}/cakey.pem" -out "${CA_DIR}/cacert.pem" -subj "/C=MX/O=Reprobados/CN=CA-reprobados" 2>/dev/null
 
-# --- PASO 3: Generar certificado raíz de la CA ---
-echo ""
-echo -e "${AMARILLO}[3/5] Generando certificado raíz de la CA (válido ${DAYS} días)...${NC}"
-openssl req -new -x509 -days ${DAYS} \
-  -key "${CA_DIR}/cakey.pem" \
-  -out "${CA_DIR}/cacert.pem" \
-  -subj "/C=MX/ST=Estado/L=Ciudad/O=Reprobados Corp/OU=IT/CN=CA-${DOMAIN}" \
-  2>/dev/null
-echo -e "${VERDE}      ✓ Certificado CA generado: ${CA_DIR}/cacert.pem${NC}"
-
-# --- PASO 4: Generar clave privada del servidor de correo ---
-echo ""
-echo -e "${AMARILLO}[4/5] Generando clave privada del servidor de correo...${NC}"
+echo -e "${AMARILLO}[3/4] Generando clave y certificado del servidor...${NC}"
 openssl genrsa -out "${SSL_DIR}/${FQDN}-key.pem" 2048 2>/dev/null
-echo -e "${VERDE}      ✓ Clave del servidor generada: ${SSL_DIR}/${FQDN}-key.pem${NC}"
+openssl req -new -key "${SSL_DIR}/${FQDN}-key.pem" -out "${SSL_DIR}/${FQDN}-req.pem" -subj "/C=MX/O=Reprobados/CN=${FQDN}" 2>/dev/null
+# ¡Aquí generamos el archivo con el guion (-) exacto que espera el servidor!
+openssl x509 -req -days ${DAYS} -in "${SSL_DIR}/${FQDN}-req.pem" -CA "${CA_DIR}/cacert.pem" -CAkey "${CA_DIR}/cakey.pem" -CAcreateserial -out "${SSL_DIR}/${FQDN}-cert.pem" 2>/dev/null
 
-# --- PASO 5: Generar CSR y firmar el certificado del servidor ---
-echo ""
-echo -e "${AMARILLO}[5/5] Generando y firmando el certificado del servidor...${NC}"
-
-# Crear solicitud de firma (CSR)
-openssl req -new \
-  -key "${SSL_DIR}/${FQDN}-key.pem" \
-  -out "${SSL_DIR}/${FQDN}-req.pem" \
-  -subj "/C=MX/ST=Estado/L=Ciudad/O=Reprobados Corp/OU=IT/CN=${FQDN}" \
-  2>/dev/null
-
-# Firmar el CSR con nuestra CA
-openssl x509 -req -days ${DAYS} \
-  -in "${SSL_DIR}/${FQDN}-req.pem" \
-  -CA "${CA_DIR}/cacert.pem" \
-  -CAkey "${CA_DIR}/cakey.pem" \
-  -CAcreateserial \
-  -out "${SSL_DIR}/${FQDN}.cert.pem" \
-  2>/dev/null
-
-# Limpiar el CSR temporal
+# Limpieza de temporales
 rm -f "${SSL_DIR}/${FQDN}-req.pem"
 
-echo -e "${VERDE}      ✓ Certificado firmado: ${SSL_DIR}/${FQDN}.cert.pem${NC}"
-
-# --- VERIFICACIÓN FINAL ---
+echo -e "${VERDE}[4/4] ¡Listo! Certificados creados correctamente en ${SSL_DIR}/${NC}"
 echo ""
-echo "================================================================"
-echo -e "${VERDE}  ✓ Certificados generados exitosamente:${NC}"
-echo ""
-echo "  $(ls -lh ${SSL_DIR}/${FQDN}-key.pem  | awk '{print $5, $9}')"
-echo "  $(ls -lh ${SSL_DIR}/${FQDN}.cert.pem | awk '{print $5, $9}')"
-echo "  $(ls -lh ${CA_DIR}/cacert.pem         | awk '{print $5, $9}')"
-echo ""
-echo -e "${AMARILLO}  Siguiente paso:${NC}"
-echo "    docker compose down && docker compose up -d"
+echo -e "${AMARILLO}Ahora ejecuta:${NC}"
+echo "docker compose down && docker compose up -d"
 echo "================================================================"
