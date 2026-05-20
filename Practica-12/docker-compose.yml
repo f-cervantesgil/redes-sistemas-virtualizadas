@@ -44,8 +44,8 @@ services:
       - "8090:80"    # Acceso web: http://IP_SERVIDOR:8090
     environment:
       # -- Conexión al servidor IMAP para leer correos --
-      ROUNDCUBEMAIL_DEFAULT_HOST: "ssl://mail.reprobados.com"
-      ROUNDCUBEMAIL_DEFAULT_PORT: 993
+      ROUNDCUBEMAIL_DEFAULT_HOST: "tls://mail.reprobados.com"
+      ROUNDCUBEMAIL_DEFAULT_PORT: 143
       # -- Conexión al servidor SMTP para enviar correos --
       ROUNDCUBEMAIL_SMTP_SERVER: "tls://mail.reprobados.com"
       ROUNDCUBEMAIL_SMTP_PORT: 587
