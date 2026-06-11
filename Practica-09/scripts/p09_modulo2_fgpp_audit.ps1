@@ -3,9 +3,9 @@
 $OutputEncoding = [System.Text.Encoding]::UTF8
 Import-Module ActiveDirectory
 
-function Write-Ok   ($msg) { Write-Host "  [OK]  $msg" -ForegroundColor Green  }
+function Write-Ok   ($msg) { Write-Host "  [OK]  $msg" -ForegroundColor Green }
 function Write-Warn ($msg) { Write-Host "  [!!]  $msg" -ForegroundColor Yellow }
-function Write-Info ($msg) { Write-Host "  [--]  $msg" -ForegroundColor Cyan   }
+function Write-Info ($msg) { Write-Host "  [--]  $msg" -ForegroundColor Cyan }
 function Write-Step ($msg) { Write-Host ""; Write-Host "  >>> $msg" -ForegroundColor Magenta }
 
 $Domain = (Get-ADDomain).DistinguishedName
@@ -33,21 +33,22 @@ function New-FGPPAdmin {
     $name = "PSO-Admins-P09"
     $exists = Get-ADFineGrainedPasswordPolicy -Filter "Name -eq '$name'" -ErrorAction SilentlyContinue
     $params = @{
-        MinPasswordLength        = 12
-        ComplexityEnabled        = $true
+        MinPasswordLength           = 12
+        ComplexityEnabled           = $true
         ReversibleEncryptionEnabled = $false
-        MaxPasswordAge           = ([timespan]"60.00:00:00")
-        MinPasswordAge           = ([timespan]"1.00:00:00")
-        PasswordHistoryCount     = 10
-        LockoutThreshold         = 5
-        LockoutDuration          = ([timespan]"0.00:30:00")
-        LockoutObservationWindow = ([timespan]"0.00:30:00")
-        Precedence               = 10
+        MaxPasswordAge              = ([timespan]"60.00:00:00")
+        MinPasswordAge              = ([timespan]"1.00:00:00")
+        PasswordHistoryCount        = 10
+        LockoutThreshold            = 5
+        LockoutDuration             = ([timespan]"0.00:30:00")
+        LockoutObservationWindow    = ([timespan]"0.00:30:00")
+        Precedence                  = 10
     }
     if ($exists) {
         Set-ADFineGrainedPasswordPolicy -Identity $name @params
         Write-Ok "PSO-Admins-P09 actualizada (min 12 chars)."
-    } else {
+    }
+    else {
         New-ADFineGrainedPasswordPolicy -Name $name -DisplayName "PSO Admins P09" @params
         Write-Ok "PSO-Admins-P09 creada (min 12 chars, precedencia 10)."
     }
@@ -58,21 +59,22 @@ function New-FGPPStandard {
     $name = "PSO-Usuarios-P09"
     $exists = Get-ADFineGrainedPasswordPolicy -Filter "Name -eq '$name'" -ErrorAction SilentlyContinue
     $params = @{
-        MinPasswordLength        = 8
-        ComplexityEnabled        = $true
+        MinPasswordLength           = 8
+        ComplexityEnabled           = $true
         ReversibleEncryptionEnabled = $false
-        MaxPasswordAge           = ([timespan]"90.00:00:00")
-        MinPasswordAge           = ([timespan]"1.00:00:00")
-        PasswordHistoryCount     = 5
-        LockoutThreshold         = 5
-        LockoutDuration          = ([timespan]"0.00:30:00")
-        LockoutObservationWindow = ([timespan]"0.00:30:00")
-        Precedence               = 20
+        MaxPasswordAge              = ([timespan]"90.00:00:00")
+        MinPasswordAge              = ([timespan]"1.00:00:00")
+        PasswordHistoryCount        = 5
+        LockoutThreshold            = 5
+        LockoutDuration             = ([timespan]"0.00:30:00")
+        LockoutObservationWindow    = ([timespan]"0.00:30:00")
+        Precedence                  = 20
     }
     if ($exists) {
         Set-ADFineGrainedPasswordPolicy -Identity $name @params
         Write-Ok "PSO-Usuarios-P09 actualizada (min 8 chars)."
-    } else {
+    }
+    else {
         New-ADFineGrainedPasswordPolicy -Name $name -DisplayName "PSO Usuarios P09" @params
         Write-Ok "PSO-Usuarios-P09 creada (min 8 chars, precedencia 20)."
     }
@@ -84,7 +86,7 @@ function Set-FGPPSubjects {
     try { Get-ADGroup -Identity $grpAdmin | Out-Null; Write-Ok "Grupo '$grpAdmin' ya existe." }
     catch { New-ADGroup -Name $grpAdmin -GroupScope Global -GroupCategory Security -Path $Domain; Write-Ok "Grupo '$grpAdmin' creado." }
 
-    foreach ($u in @("admin_identidad","admin_storage","admin_politicas","admin_auditoria")) {
+    foreach ($u in @("admin_identidad", "admin_storage", "admin_politicas", "admin_auditoria")) {
         try { Add-ADGroupMember -Identity $grpAdmin -Members $u -ErrorAction SilentlyContinue; Write-Ok "  $u -> $grpAdmin" }
         catch { Write-Warn "  No se pudo agregar $u" }
     }
@@ -104,7 +106,8 @@ function Set-FGPPSubjects {
             }
             Add-ADFineGrainedPasswordPolicySubject -Identity "PSO-Usuarios-P09" -Subjects $grpName
             Write-Ok "PSO-Usuarios-P09 aplicada a $grpName."
-        } catch { Write-Warn "PSO-Usuarios-P09 en $grpName - $_" }
+        }
+        catch { Write-Warn "PSO-Usuarios-P09 en $grpName - $_" }
     }
 }
 
@@ -114,21 +117,22 @@ function Enable-Auditing {
     # Usar GUIDs para que funcione en Windows en cualquier idioma (ES/EN)
     # {GUID} = subcategoria especifica de auditoria
     $subcats = @(
-        @{ Name = "Logon";                    GUID = "{0cce9215-69ae-11d9-bed3-505054503030}" }
-        @{ Name = "Logoff";                   GUID = "{0cce9216-69ae-11d9-bed3-505054503030}" }
-        @{ Name = "Account Lockout";          GUID = "{0cce9217-69ae-11d9-bed3-505054503030}" }
-        @{ Name = "Object Access";            GUID = "{0cce9222-69ae-11d9-bed3-505054503030}" }
-        @{ Name = "Account Management";       GUID = "{0cce9227-69ae-11d9-bed3-505054503030}" }
-        @{ Name = "Policy Change";            GUID = "{0cce922f-69ae-11d9-bed3-505054503030}" }
+        @{ Name = "Logon"; GUID = "{0cce9215-69ae-11d9-bed3-505054503030}" }
+        @{ Name = "Logoff"; GUID = "{0cce9216-69ae-11d9-bed3-505054503030}" }
+        @{ Name = "Account Lockout"; GUID = "{0cce9217-69ae-11d9-bed3-505054503030}" }
+        @{ Name = "Object Access"; GUID = "{0cce9222-69ae-11d9-bed3-505054503030}" }
+        @{ Name = "Account Management"; GUID = "{0cce9227-69ae-11d9-bed3-505054503030}" }
+        @{ Name = "Policy Change"; GUID = "{0cce922f-69ae-11d9-bed3-505054503030}" }
         @{ Name = "Directory Service Access"; GUID = "{0cce923b-69ae-11d9-bed3-505054503030}" }
-        @{ Name = "Credential Validation";    GUID = "{0cce923f-69ae-11d9-bed3-505054503030}" }
+        @{ Name = "Credential Validation"; GUID = "{0cce923f-69ae-11d9-bed3-505054503030}" }
     )
 
     foreach ($s in $subcats) {
         $result = auditpol /set /subcategory:"$($s.GUID)" /success:enable /failure:enable 2>&1
         if ($LASTEXITCODE -eq 0) {
             Write-Ok "Auditoria habilitada: $($s.Name)"
-        } else {
+        }
+        else {
             Write-Warn "No se pudo habilitar: $($s.Name) - $result"
         }
     }
@@ -138,8 +142,8 @@ function Enable-Auditing {
 function Show-AuditStatus {
     Write-Step "Estado de auditoria actual:"
     Write-Host ""
-    auditpol /get /category:"Logon/Logoff","Object Access","Account Management" 2>&1 |
-        ForEach-Object { Write-Host "  $_" }
+    auditpol /get /category:"Logon/Logoff", "Object Access", "Account Management" 2>&1 |
+    ForEach-Object { Write-Host "  $_" }
 }
 
 function Show-FGPPs {
