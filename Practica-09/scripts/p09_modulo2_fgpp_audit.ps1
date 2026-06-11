@@ -104,7 +104,7 @@ function Set-FGPPSubjects {
             }
             Add-ADFineGrainedPasswordPolicySubject -Identity "PSO-Usuarios-P09" -Subjects $grpName
             Write-Ok "PSO-Usuarios-P09 aplicada a $grpName."
-        } catch { Write-Warn "PSO-Usuarios-P09 en $grpName: $_" }
+        } catch { Write-Warn "PSO-Usuarios-P09 en $grpName - $_" }
     }
 }
 
