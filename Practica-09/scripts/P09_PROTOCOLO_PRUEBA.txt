@@ -1,0 +1,296 @@
+
+══════════════════════════════════════════════════════════════════════════════
+    PROTOCOLO DE PRUEBA — PRACTICA 09
+    Seguridad de Identidad, Delegacion y MFA
+    UAS FIM — Administracion de Sistemas — Grupo 3-02
+    Servidor: 192.168.56.10  |  Cliente Win10: 192.168.56.30  |  Alpine: 192.168.56.20
+══════════════════════════════════════════════════════════════════════════════
+
+PREREQUISITOS (verificar antes de empezar)
+──────────────────────────────────────────
+[ ] Scripts de P08 ya funcionando (FSRM, AppLocker, Usuarios en AD)
+[ ] Dominio lab.local activo, Windows 10 y Alpine unidos al dominio
+[ ] Carpeta Z:\scripts\ accesible desde el servidor
+[ ] Ejecutar todo como Administrador del dominio
+
+══════════════════════════════════════════════════════════════════════════════
+PASO 0 — DESPLIEGUE DE SCRIPTS
+══════════════════════════════════════════════════════════════════════════════
+
+En el Windows Server 2022:
+  1. Copia todos los archivos p09_*.ps1 a tu carpeta compartida en tu PC
+     (la que aparece como Z:\scripts\ en el servidor)
+
+  2. Abre PowerShell como Administrador en el servidor y ejecuta:
+
+     Set-ExecutionPolicy Bypass -Scope Process -Force
+     & "Z:\scripts\p09_deploy.ps1"
+
+  3. El script copia todo a C:\P09\ y ofrece abrir el menú.
+
+  Alternativa directa si ya copiaste los archivos a C:\P09\:
+     cd C:\P09
+     .\p09_menu.ps1
+
+══════════════════════════════════════════════════════════════════════════════
+TEST 1 — VERIFICACION DE DELEGACION RBAC (30% rúbrica)
+Acción A: admin_identidad puede resetear contraseña
+Acción B: admin_storage NO puede (Acceso Denegado)
+══════════════════════════════════════════════════════════════════════════════
+
+PREPARACION:
+  En el menú P09 → Módulo 1 → opción 7 (Ejecutar TODO)
+  Esto crea los 4 usuarios delegados y configura las ACL.
+
+PRUEBA A — admin_identidad (DEBE FUNCIONAR):
+──────────────────────────────────────────────
+  Opción 1: En Active Directory Users and Computers (ADUC)
+    a) Cierra sesión como Administrador
+    b) Inicia sesión con: admin_identidad / Admin@Practica09!
+    c) Abre ADUC → OU Cuates → click derecho en cualquier usuario
+    d) Selecciona "Reset Password"
+    e) Ingresa nueva contraseña → debe funcionar sin error
+    f) CAPTURA DE PANTALLA: cuadro confirmando el reset exitoso
+
+  Opción 2: Desde PowerShell como admin_identidad
+    Set-ADAccountPassword -Identity jgarcia `
+        -Reset -NewPassword (ConvertTo-SecureString "NuevaPwd123!" -AsPlainText -Force)
+    # Resultado esperado: sin error
+
+PRUEBA B — admin_storage (DEBE FALLAR CON ACCESO DENEGADO):
+────────────────────────────────────────────────────────────
+  a) Cierra sesión
+  b) Inicia sesión con: admin_storage / Admin@Practica09!
+  c) Abre ADUC → OU Cuates → click derecho en el mismo usuario
+  d) Selecciona "Reset Password"
+  e) DEBE aparecer: "Acceso Denegado" o "Insufficient access rights"
+  f) CAPTURA DE PANTALLA: mensaje de error de Acceso Denegado
+
+  Opción desde PowerShell como admin_storage:
+    Set-ADAccountPassword -Identity jgarcia `
+        -Reset -NewPassword (ConvertTo-SecureString "NuevaPwd123!" -AsPlainText -Force)
+    # Resultado esperado: PermissionDenied exception
+
+EVIDENCIAS REQUERIDAS:
+  [ ] Captura A: Reset exitoso con admin_identidad
+  [ ] Captura B: "Acceso Denegado" con admin_storage
+
+══════════════════════════════════════════════════════════════════════════════
+TEST 2 — DIRECTIVA DE CONTRASENA AJUSTADA / FGPP (15% rúbrica)
+Intentar contraseña de 8 chars para admin_identidad (requiere 12) → RECHAZAR
+══════════════════════════════════════════════════════════════════════════════
+
+PREPARACION:
+  En el menú P09 → Módulo 2 → opción 7 (Ejecutar TODO)
+
+PRUEBA:
+  Vuelve a iniciar sesión como Administrador del dominio.
+  
+  Desde PowerShell:
+    Set-ADAccountPassword -Identity admin_identidad `
+        -Reset -NewPassword (ConvertTo-SecureString "Test1234" -AsPlainText -Force)
+    # "Test1234" tiene 8 caracteres → debe ser RECHAZADO
+
+  Resultado esperado:
+    "The password does not meet the length, complexity, or history requirement"
+    o bien: "La contraseña no cumple los requisitos de complejidad"
+
+  Verificar FGPP efectiva:
+    Get-ADUserResultantPasswordPolicy -Identity admin_identidad
+    # MinPasswordLength debe mostrar: 12
+
+EVIDENCIAS REQUERIDAS:
+  [ ] Captura: Error de contraseña al intentar 8 caracteres
+  [ ] Captura: Resultado de Get-ADUserResultantPasswordPolicy mostrando 12
+
+══════════════════════════════════════════════════════════════════════════════
+TEST 3 — FLUJO MFA (40% rúbrica — la mas importante)
+El login debe solicitar código TOTP después de la contraseña
+══════════════════════════════════════════════════════════════════════════════
+
+PREPARACION:
+  Esta parte es manual. Sigue la guía del Módulo 4 opción 1.
+  
+  Opción recomendada para el laboratorio: MultiOTP (gratuito)
+
+  PASO 3.1 — Instalar MultiOTP Credential Provider:
+    a) Descarga de: https://www.multiotp.net/
+       Archivo: multiotp-windows-credential-provider-*.zip
+    b) Extrae en C:\multiotp\
+    c) Copia las DLL al sistema:
+       copy C:\multiotp\MultiotpCredentialProvider.dll C:\Windows\System32\
+       copy C:\multiotp\MultiotpCredentialProvider.ini C:\Windows\System32\
+    d) Registra el Credential Provider:
+       regsvr32 C:\Windows\System32\MultiotpCredentialProvider.dll
+    e) Configura el secreto compartido en C:\Windows\System32\MultiotpCredentialProvider.ini
+
+  PASO 3.2 — Configurar Google Authenticator:
+    a) En tu celular, abre Google Authenticator
+    b) Pulsa "+" → "Ingresar clave de configuración"
+    c) Nombre: Lab.local MFA
+    d) Clave: el secreto Base32 configurado en MultiOTP
+    e) Tipo: Basada en tiempo (TOTP)
+
+  PASO 3.3 — Verificar flujo en el servidor:
+    a) Bloquea la pantalla del servidor (Win+L)
+    b) Ingresa: usuario=Administrador, contraseña=tu_contraseña
+    c) DEBE aparecer un campo adicional pidiendo el código de 6 dígitos
+    d) Ingresa el código de Google Authenticator
+    e) El acceso debe concederse
+
+EVIDENCIAS REQUERIDAS:
+  [ ] Captura: pantalla de login mostrando campo adicional TOTP
+  [ ] Foto del celular con Google Authenticator mostrando el código de 6 dígitos
+  [ ] Captura: acceso concedido después del TOTP correcto
+
+══════════════════════════════════════════════════════════════════════════════
+TEST 4 — BLOQUEO POR MFA FALLIDO (parte del 40% rúbrica)
+3 códigos incorrectos → cuenta bloqueada 30 minutos
+══════════════════════════════════════════════════════════════════════════════
+
+PREPARACION:
+  En el menú P09 → Módulo 4 → opción 2 y opción 3
+  Esto configura: 3 intentos → bloqueo 30 minutos
+
+PRUEBA:
+  a) En el login del servidor (o desde Windows 10 intentando conectar)
+  b) Ingresa credenciales válidas (usuario + contraseña correctos)
+  c) En el campo TOTP, ingresa "000000" (incorrecto) → intento 1
+  d) Vuelve a intentar → ingresa "111111" → intento 2
+  e) Vuelve a intentar → ingresa "222222" → intento 3
+  f) La cuenta debe quedar bloqueada
+
+  Verificar bloqueo desde otro equipo (como Administrador):
+    Search-ADAccount -LockedOut | Select Name, SamAccountName, LockedOut
+    # Debe aparecer la cuenta bloqueada
+
+  Ver en ADUC:
+    a) Abre Active Directory Users and Computers
+    b) Busca el usuario
+    c) Propiedades → Account → "Account is locked out" debe estar marcado
+
+  Desbloquear después de la prueba (Módulo 4 opción 7):
+    Unlock-ADAccount -Identity <usuario>
+
+EVIDENCIAS REQUERIDAS:
+  [ ] Captura: mensaje de "cuenta bloqueada" en la pantalla de login
+  [ ] Captura: usuario marcado como "Locked" en ADUC o en PowerShell
+
+══════════════════════════════════════════════════════════════════════════════
+TEST 5 — REPORTE DE AUDITORIA AUTOMATIZADO (15% rúbrica)
+Script extrae últimos 10 intentos de acceso denegado → archivo TXT/CSV
+══════════════════════════════════════════════════════════════════════════════
+
+PREPARACION:
+  Primero genera algunos eventos: repite intentos fallidos de login.
+  Luego habilita auditoría: Módulo 2 → opción 4.
+
+PRUEBA:
+  En el menú P09 → Módulo 3 → opción 4 (Reporte completo)
+
+  El script genera automáticamente:
+    C:\P09-Auditoria\REPORTE_COMPLETO_P09_YYYYMMDD_HHMMSS.txt
+    C:\P09-Auditoria\reporte_4625_YYYYMMDD_HHMMSS.csv
+
+  Verificar manualmente:
+    Get-WinEvent -FilterHashtable @{LogName="Security"; Id=4625} -MaxEvents 10 |
+        Select-Object TimeCreated, Id, Message |
+        Export-Csv C:\P09-Auditoria\manual_test5.csv -NoTypeInformation
+    
+    # Abrir el CSV para verificar que tiene datos
+
+EVIDENCIAS REQUERIDAS:
+  [ ] Captura: PowerShell ejecutando el script con resultados visibles
+  [ ] Adjuntar en el reporte: el archivo TXT o CSV generado (abrir y pegar contenido)
+
+══════════════════════════════════════════════════════════════════════════════
+VERIFICACION AUTOMATICA COMPLETA (ejecutar al final)
+══════════════════════════════════════════════════════════════════════════════
+
+  En el menú P09 → Módulo 5 → opción 6 (Ejecutar TODOS los tests)
+
+  Esto genera automáticamente:
+    C:\P09-Auditoria\RESUMEN_TESTS_P09_*.txt
+
+  El resumen muestra PASS/FAIL para cada punto de la rúbrica.
+
+══════════════════════════════════════════════════════════════════════════════
+RESUMEN DE EVIDENCIAS PARA EL REPORTE TECNICO
+══════════════════════════════════════════════════════════════════════════════
+
+Carpeta sugerida para organizar capturas: C:\P09\evidencias\
+
+  evidencia_test1a_reset_exitoso.png       (Rol 1 OK)
+  evidencia_test1b_acceso_denegado.png     (Rol 2 bloqueado)
+  evidencia_test2_fgpp_error.png           (contraseña 8 chars rechazada)
+  evidencia_test2_fgpp_resultante.png      (Get-ADUserResultantPasswordPolicy)
+  evidencia_test3_login_totp.png           (pantalla login con campo TOTP)
+  evidencia_test3_google_auth.jpg          (foto celular con código)
+  evidencia_test4_cuenta_bloqueada.png     (cuenta locked)
+  evidencia_test4_aduc_locked.png          (ADUC mostrando bloqueada)
+  evidencia_test5_script_output.png        (PowerShell con resultados)
+  evidencia_test5_reporte.txt              (archivo generado adjunto)
+
+══════════════════════════════════════════════════════════════════════════════
+DIAGRAMA DE FLUJO MFA (para el reporte técnico — sección Documentación 15%)
+══════════════════════════════════════════════════════════════════════════════
+
+  [Usuario escribe usuario + contraseña]
+           │
+           ▼
+  [LSASS verifica credenciales contra AD]
+           │ credenciales válidas
+           ▼
+  [Credential Provider (MultiOTP/WinOTP) intercepta el login]
+           │
+           ▼
+  [Pantalla solicita código TOTP de 6 dígitos]
+           │
+           ├─── Código correcto ──────────────────────────────────────────┐
+           │                                                              ▼
+           │                                              [Acceso CONCEDIDO]
+           │
+           ├─── Código incorrecto (intento 1/3) ──────────────────────────┐
+           │                                                              ▼
+           │                                              [Vuelve a solicitar]
+           │
+           ├─── Código incorrecto (intento 2/3) ──────────────────────────┐
+           │                                                              ▼
+           │                                              [Vuelve a solicitar]
+           │
+           └─── Código incorrecto (intento 3/3) ──────────────────────────┐
+                                                                         ▼
+                                                    [Cuenta BLOQUEADA 30 minutos]
+                                                    [Event ID 4740 → Security Log]
+                                                    [Requiere Administrador para desbloquear]
+
+  Validación TOTP:
+    Secreto Base32 compartido + timestamp (ventana ±30 seg) → HMAC-SHA1 → 6 dígitos
+    Este algoritmo es compatible con Google Authenticator (RFC 6238)
+
+══════════════════════════════════════════════════════════════════════════════
+COMANDOS DE REFERENCIA RAPIDA
+══════════════════════════════════════════════════════════════════════════════
+
+# Ver usuarios bloqueados
+Search-ADAccount -LockedOut | Select Name, SamAccountName
+
+# Desbloquear cuenta
+Unlock-ADAccount -Identity <usuario>
+
+# Ver FGPP aplicada a un usuario
+Get-ADUserResultantPasswordPolicy -Identity admin_identidad
+
+# Ver intentos fallidos de login
+Get-WinEvent -FilterHashtable @{LogName="Security"; Id=4625} -MaxEvents 10
+
+# Ver eventos de bloqueo
+Get-WinEvent -FilterHashtable @{LogName="Security"; Id=4740} -MaxEvents 10
+
+# Estado de auditoría
+auditpol /get /subcategory:"Logon"
+
+# Verificar FGPP configuradas
+Get-ADFineGrainedPasswordPolicy -Filter * | Sort Precedence | Format-Table Name, MinPasswordLength, LockoutThreshold, Precedence
+
+══════════════════════════════════════════════════════════════════════════════
