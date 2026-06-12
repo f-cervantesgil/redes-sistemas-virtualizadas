@@ -134,6 +134,69 @@ function Set-ACL-Rol4 {
     Write-Info "Restriccion: estrictamente de solo lectura."
 }
 
+function Set-ConsoleLogonRights {
+    Write-Step "Configurando permisos de inicio de sesion local y RDP en el DC..."
+    
+    # Obtener SIDs de los usuarios delegados
+    $sids = @()
+    foreach ($u in $Users) {
+        try {
+            $sid = (Get-ADUser -Identity $u.Name).SID.Value
+            $sids += $sid
+        } catch {
+            Write-Warn "No se pudo obtener SID para $($u.Name)"
+        }
+    }
+
+    if ($sids.Count -eq 0) {
+        Write-Warn "No hay usuarios delegados disponibles para asignar derechos."
+        return
+    }
+
+    $tempInf = "$env:TEMP\secedit_logon.inf"
+    $dbFile  = "$env:TEMP\secedit_logon.sdb"
+
+    # Exportar directivas de derechos de usuario
+    secedit /export /cfg $tempInf /areas USER_RIGHTS | Out-Null
+
+    if (Test-Path $tempInf) {
+        $cfgText = Get-Content $tempInf -Raw
+        $modified = $false
+
+        # SeInteractiveLogonRight (Local) y SeRemoteInteractiveLogonRight (RDP)
+        foreach ($right in @("SeInteractiveLogonRight", "SeRemoteInteractiveLogonRight")) {
+            if ($cfgText -match "$right\s*=\s*(.*)") {
+                $line = $matches[0].Trim()
+                $updatedLine = $line
+                foreach ($sid in $sids) {
+                    if ($updatedLine -notmatch [regex]::Escape($sid)) {
+                        $updatedLine += ",*$sid"
+                        $modified = $true
+                    }
+                }
+                if ($modified) {
+                    $cfgText = $cfgText -replace [regex]::Escape($line), $updatedLine
+                }
+            } else {
+                $newLine = "$right = " + ($sids | ForEach-Object { "*$_" } -join ",")
+                $cfgText = $cfgText -replace "\[Privilege Rights\]", "[Privilege Rights]`r`n$newLine"
+                $modified = $true
+            }
+        }
+
+        if ($modified) {
+            $cfgText | Out-File $tempInf -Encoding utf8
+            secedit /configure /db $dbFile /cfg $tempInf /areas USER_RIGHTS | Out-Null
+            gpupdate /force | Out-Null
+            Write-Ok "Derechos de inicio de sesion local y RDP concedidos a usuarios delegados."
+        } else {
+            Write-Ok "Los usuarios delegados ya cuentan con derechos de inicio de sesion."
+        }
+    } else {
+        Write-Warn "No se pudo exportar la configuracion de seguridad con secedit."
+    }
+}
+
 function Show-UserSummary {
     Write-Step "Resumen de usuarios delegados:"
     Write-Host ""
@@ -157,12 +220,12 @@ while (-not $exit) {
     $op = Read-Host "  Selecciona"
     switch ($op.Trim()) {
         "1" { New-RequiredOUs }
-        "2" { New-DelegatedUsers }
+        "2" { New-DelegatedUsers; Set-ConsoleLogonRights }
         "3" { Set-ACL-Rol1 }
         "4" { Set-ACL-Rol2 }
         "5" { Set-ACL-Rol3 }
         "6" { Set-ACL-Rol4 }
-        "7" { New-RequiredOUs; New-DelegatedUsers; Set-ACL-Rol1; Set-ACL-Rol2; Set-ACL-Rol3; Set-ACL-Rol4; Write-Ok "=== RBAC completado ===" }
+        "7" { New-RequiredOUs; New-DelegatedUsers; Set-ConsoleLogonRights; Set-ACL-Rol1; Set-ACL-Rol2; Set-ACL-Rol3; Set-ACL-Rol4; Write-Ok "=== RBAC completado ===" }
         "8" { Show-UserSummary }
         "0" { $exit = $true }
         default { Write-Warn "Opcion invalida."; Start-Sleep -Seconds 1 }
