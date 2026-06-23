@@ -33,11 +33,12 @@ function Show-Menu {
     Write-Host "  [1]  Crear OUs (Cuates y NoCuates) si no existen"
     Write-Host "  [2]  Crear los 4 usuarios de administracion delegada"
     Write-Host "  [3]  ACL Rol 1 (admin_identidad) - Reset Password + atributos"
-    Write-Host "  [4]  ACL Rol 2 (admin_storage)   - DENEGAR Reset Password"
+    Write-Host "  [4]  ACL Rol 2 (admin_storage)   - DENEGAR Reset Password (robusto)"
     Write-Host "  [5]  ACL Rol 3 (admin_politicas) - Lectura dominio + GPO"
     Write-Host "  [6]  ACL Rol 4 (admin_auditoria) - Solo lectura"
-    Write-Host "  [7]  Ejecutar TODO (pasos 1 al 6)"
+    Write-Host "  [7]  Ejecutar TODO (pasos 1 al 6 + verificacion)"
     Write-Host "  [8]  Mostrar resumen de usuarios delegados"
+    Write-Host "  [9]  Verificar que admin_storage NO puede resetear (TEST)"
     Write-Host "  [0]  Volver al menu principal"
     Write-Host ""
 }
@@ -93,13 +94,69 @@ function Set-ACL-Rol1 {
 }
 
 function Set-ACL-Rol2 {
-    Write-Step "ACL Rol 2 (admin_storage) - DENEGAR Reset Password..."
+    Write-Step "ACL Rol 2 (admin_storage) - DENEGAR Reset Password (metodo robusto)..."
+
+    # PASO 1: Sacar a admin_storage de cualquier grupo privilegiado que anule el Deny
+    $gruposPrivilegiados = @("Account Operators", "Administrators", "Domain Admins", "Server Operators")
+    foreach ($grp in $gruposPrivilegiados) {
+        try {
+            $members = Get-ADGroupMember -Identity $grp -ErrorAction SilentlyContinue |
+                       Where-Object { $_.SamAccountName -eq "admin_storage" }
+            if ($members) {
+                Remove-ADGroupMember -Identity $grp -Members "admin_storage" -Confirm:$false
+                Write-Warn "admin_storage removido de grupo privilegiado: $grp"
+            }
+        } catch { }
+    }
+    Write-Ok "admin_storage no pertenece a grupos privilegiados."
+
+    # PASO 2: Aplicar DENY explicito usando GUID real del derecho 'Reset Password'
+    # GUID oficial: 00299570-246d-11d0-a768-00aa006e0529
+    $resetPasswordGuid = [Guid]"00299570-246d-11d0-a768-00aa006e0529"
+    # GUID del objeto tipo 'user' (para que aplique solo a descendientes User)
+    $userObjectGuid    = [Guid]"bf967aba-0de6-11d0-a285-00aa003049e2"
+
+    # SID del usuario admin_storage
+    try {
+        $sid = New-Object System.Security.Principal.SecurityIdentifier(
+                   (Get-ADUser -Identity "admin_storage").SID
+               )
+    } catch {
+        Write-Err "No se encontro admin_storage en AD. Ejecuta primero la opcion 2 (crear usuarios)."
+        return
+    }
+
+    foreach ($ouDN in @($OUCuates, $OUNoCuates)) {
+        try {
+            $ouPath = "AD:\$ouDN"
+            $acl    = Get-Acl -Path $ouPath
+
+            # Construir ACE: Deny / Extended Right Reset Password / en objetos User descendientes
+            $ace = New-Object System.DirectoryServices.ActiveDirectoryAccessRule(
+                $sid,
+                [System.DirectoryServices.ActiveDirectoryRights]::ExtendedRight,
+                [System.Security.AccessControl.AccessControlType]::Deny,
+                $resetPasswordGuid,
+                [System.DirectoryServices.ActiveDirectorySecurityInheritance]::Descendents,
+                $userObjectGuid
+            )
+
+            $acl.AddAccessRule($ace)
+            Set-Acl -Path $ouPath -AclObject $acl
+            Write-Ok "DENY Reset Password aplicado en: $ouDN"
+        } catch {
+            Write-Err "Error aplicando ACL en $ouDN : $_"
+        }
+    }
+
+    # PASO 3: Tambien denegar via dsacls como capa adicional
     $user = "$NetBIOSName\admin_storage"
     foreach ($ou in @($OUCuates, $OUNoCuates)) {
-        dsacls $ou /D "${user}:CA;Reset Password;user" | Out-Null
-        Write-Ok "DENEGADO Reset Password para admin_storage en: $ou"
+        dsacls $ou /D "${user}:CA;Reset Password;user" 2>$null | Out-Null
     }
-    Write-Info "admin_storage solo gestiona FSRM (cuotas, apantallamiento)."
+
+    Write-Ok "=== admin_storage NO puede resetear contrasenas ==="
+    Write-Info "admin_storage solo gestiona FSRM (cuotas y apantallamiento de archivos)."
 }
 
 function Set-ACL-Rol3 {
@@ -202,16 +259,66 @@ function Show-UserSummary {
     Write-Host ""
     foreach ($u in $Users) {
         try {
-            $adUser = Get-ADUser -Identity $u.Name -Properties Description, Enabled
+            $adUser = Get-ADUser -Identity $u.Name -Properties Description, Enabled, MemberOf
             Write-Host "  Usuario     : " -NoNewline -ForegroundColor White
             Write-Host $adUser.SamAccountName -ForegroundColor Green
             Write-Host "  Descripcion : $($adUser.Description)"
             Write-Host "  Habilitado  : $($adUser.Enabled)"
+            $groups = ($adUser.MemberOf | ForEach-Object { ($_ -split ',')[0] -replace 'CN=','' }) -join ', '
+            Write-Host "  Grupos      : $groups"
             Write-Host "  ----------------------------------------------------" -ForegroundColor DarkGray
         } catch {
             Write-Warn "No encontrado en AD: $($u.Name)"
         }
     }
+}
+
+function Test-ACLRol2 {
+    Write-Step "Verificando que admin_storage NO puede resetear contrasenas..."
+    Write-Host ""
+
+    # Verificar grupos privilegiados
+    $enGrupoPriv = $false
+    foreach ($grp in @("Account Operators","Administrators","Domain Admins")) {
+        try {
+            $m = Get-ADGroupMember -Identity $grp -ErrorAction SilentlyContinue |
+                 Where-Object { $_.SamAccountName -eq "admin_storage" }
+            if ($m) {
+                Write-Err "admin_storage esta en '$grp' — ESTO anula el Deny!"
+                $enGrupoPriv = $true
+            }
+        } catch { }
+    }
+    if (-not $enGrupoPriv) {
+        Write-Ok "admin_storage NO esta en grupos privilegiados. OK"
+    }
+
+    # Verificar ACE Deny en las OUs
+    $resetGuid = "00299570-246d-11d0-a768-00aa006e0529"
+    foreach ($ouDN in @($OUCuates, $OUNoCuates)) {
+        try {
+            $acl  = Get-Acl "AD:\$ouDN"
+            $deny = $acl.Access | Where-Object {
+                $_.IdentityReference -like "*admin_storage*" -and
+                $_.AccessControlType -eq "Deny" -and
+                $_.ObjectType -eq $resetGuid
+            }
+            if ($deny) {
+                Write-Ok "ACE Deny Reset Password encontrado en: $($ouDN.Split(',')[0])"
+            } else {
+                Write-Warn "No se encontro ACE Deny en $($ouDN.Split(',')[0]) — ejecuta opcion 4"
+            }
+        } catch {
+            Write-Warn "No se pudo leer ACL de: $ouDN"
+        }
+    }
+
+    Write-Host ""
+    Write-Host "  PRUEBA MANUAL:" -ForegroundColor Yellow
+    Write-Info "  1. Cierra sesion"
+    Write-Info "  2. Inicia como REDES\admin_storage (contrasena: Admin@Practica09!)"
+    Write-Info "  3. Abre ADUC -> OU Cuates -> clic derecho en jgarcia -> Reset Password"
+    Write-Info "  4. Debe aparecer: 'Acceso Denegado' o 'Insufficient rights'"
 }
 
 $exit = $false
@@ -225,8 +332,9 @@ while (-not $exit) {
         "4" { Set-ACL-Rol2 }
         "5" { Set-ACL-Rol3 }
         "6" { Set-ACL-Rol4 }
-        "7" { New-RequiredOUs; New-DelegatedUsers; Set-ConsoleLogonRights; Set-ACL-Rol1; Set-ACL-Rol2; Set-ACL-Rol3; Set-ACL-Rol4; Write-Ok "=== RBAC completado ===" }
+        "7" { New-RequiredOUs; New-DelegatedUsers; Set-ConsoleLogonRights; Set-ACL-Rol1; Set-ACL-Rol2; Set-ACL-Rol3; Set-ACL-Rol4; Write-Ok "=== RBAC completado ==="; Test-ACLRol2 }
         "8" { Show-UserSummary }
+        "9" { Test-ACLRol2 }
         "0" { $exit = $true }
         default { Write-Warn "Opcion invalida."; Start-Sleep -Seconds 1 }
     }

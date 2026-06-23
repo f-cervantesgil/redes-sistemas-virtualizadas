@@ -2,90 +2,99 @@
 ══════════════════════════════════════════════════════════════════════════════
     PROTOCOLO DE PRUEBA — PRACTICA 09
     Seguridad de Identidad, Delegacion y MFA
-    UAS FIM — Administracion de Sistemas — Grupo 3-02
-    Servidor: 192.168.56.10  |  Cliente Win10: 192.168.56.30  |  Alpine: 192.168.56.20
+    UAS FIM — Administracion de Sistemas
+    Dominio: redes.local
+    Servidor:     192.168.56.10  (WS2022-DC   — Windows Server 2022)
+    Cliente Win:  192.168.56.30  (WIN10-CLI   — Windows 10 Pro)
+    Cliente Linux:192.168.56.20  (MINT-CLI    — Linux Mint 21)
 ══════════════════════════════════════════════════════════════════════════════
 
 PREREQUISITOS (verificar antes de empezar)
 ──────────────────────────────────────────
-[ ] Scripts de P08 ya funcionando (FSRM, AppLocker, Usuarios en AD)
-[ ] Dominio lab.local activo, Windows 10 y Alpine unidos al dominio
-[ ] Carpeta Z:\scripts\ accesible desde el servidor
-[ ] Ejecutar todo como Administrador del dominio
+[ ] Dominio redes.local activo en WS2022-DC
+[ ] Windows 10 unido al dominio redes.local
+[ ] Linux Mint unido al dominio redes.local (via realm/sssd)
+[ ] Scripts p09_*.ps1 copiados en C:\P09\ del servidor
+[ ] Ejecutar todo como Administrador del dominio (REDES\Administrador)
+[ ] Red host-only: 192.168.56.0/24 configurada en VirtualBox
 
 ══════════════════════════════════════════════════════════════════════════════
 PASO 0 — DESPLIEGUE DE SCRIPTS
 ══════════════════════════════════════════════════════════════════════════════
 
 En el Windows Server 2022:
-  1. Copia todos los archivos p09_*.ps1 a tu carpeta compartida en tu PC
-     (la que aparece como Z:\scripts\ en el servidor)
+  1. Abre PowerShell como Administrador
 
-  2. Abre PowerShell como Administrador en el servidor y ejecuta:
-
+  2. Ejecuta:
      Set-ExecutionPolicy Bypass -Scope Process -Force
-     & "Z:\scripts\p09_deploy.ps1"
-
-  3. El script copia todo a C:\P09\ y ofrece abrir el menú.
-
-  Alternativa directa si ya copiaste los archivos a C:\P09\:
      cd C:\P09
      .\p09_menu.ps1
 
+  3. El menu principal muestra los 5 modulos disponibles.
+
+  Alternativa — copiar desde tu PC:
+     scp -r "C:\Users\alfre\Desktop\redes-sistemas-virtualizadas\Practica-09\scripts\*" Administrador@192.168.56.10:C:\P09\
+
 ══════════════════════════════════════════════════════════════════════════════
-TEST 1 — VERIFICACION DE DELEGACION RBAC (30% rúbrica)
-Acción A: admin_identidad puede resetear contraseña
-Acción B: admin_storage NO puede (Acceso Denegado)
+TEST 1 — VERIFICACION DE DELEGACION RBAC (30% rubrica)
+Accion A: admin_identidad puede resetear contrasena
+Accion B: admin_storage NO puede (Acceso Denegado)
 ══════════════════════════════════════════════════════════════════════════════
 
 PREPARACION:
-  En el menú P09 → Módulo 1 → opción 7 (Ejecutar TODO)
-  Esto crea los 4 usuarios delegados y configura las ACL.
+  En el menu P09 → Modulo 1 → opcion 7 (Ejecutar TODO)
+  Esto crea los 4 usuarios delegados y configura las ACL en redes.local.
+
+  Usuarios creados (contrasena: Admin@Practica09!):
+    admin_identidad  → puede hacer Reset Password en OU Cuates y NoCuates
+    admin_storage    → DENEGADO Reset Password (solo FSRM)
+    admin_politicas  → Lectura dominio + Group Policy Creator Owners
+    admin_auditoria  → Solo lectura + Event Log Readers
 
 PRUEBA A — admin_identidad (DEBE FUNCIONAR):
 ──────────────────────────────────────────────
-  Opción 1: En Active Directory Users and Computers (ADUC)
-    a) Cierra sesión como Administrador
-    b) Inicia sesión con: admin_identidad / Admin@Practica09!
-    c) Abre ADUC → OU Cuates → click derecho en cualquier usuario
+  Opcion 1: Desde Active Directory Users and Computers (ADUC)
+    a) En el servidor: cierra sesion como Administrador
+    b) Inicia sesion con: REDES\admin_identidad / Admin@Practica09!
+    c) Abre ADUC → OU Cuates → click derecho en jgarcia
     d) Selecciona "Reset Password"
-    e) Ingresa nueva contraseña → debe funcionar sin error
+    e) Ingresa nueva contrasena → debe funcionar sin error
     f) CAPTURA DE PANTALLA: cuadro confirmando el reset exitoso
 
-  Opción 2: Desde PowerShell como admin_identidad
+  Opcion 2: Desde PowerShell como admin_identidad
     Set-ADAccountPassword -Identity jgarcia `
         -Reset -NewPassword (ConvertTo-SecureString "NuevaPwd123!" -AsPlainText -Force)
-    # Resultado esperado: sin error
+    # Resultado esperado: sin error, sin output = exito
 
 PRUEBA B — admin_storage (DEBE FALLAR CON ACCESO DENEGADO):
 ────────────────────────────────────────────────────────────
-  a) Cierra sesión
-  b) Inicia sesión con: admin_storage / Admin@Practica09!
-  c) Abre ADUC → OU Cuates → click derecho en el mismo usuario
+  a) Cierra sesion
+  b) Inicia sesion con: REDES\admin_storage / Admin@Practica09!
+  c) Abre ADUC → OU Cuates → click derecho en jgarcia
   d) Selecciona "Reset Password"
   e) DEBE aparecer: "Acceso Denegado" o "Insufficient access rights"
   f) CAPTURA DE PANTALLA: mensaje de error de Acceso Denegado
 
-  Opción desde PowerShell como admin_storage:
+  Desde PowerShell como admin_storage:
     Set-ADAccountPassword -Identity jgarcia `
         -Reset -NewPassword (ConvertTo-SecureString "NuevaPwd123!" -AsPlainText -Force)
-    # Resultado esperado: PermissionDenied exception
+    # Resultado esperado: PermissionDenied / Access is denied
 
 EVIDENCIAS REQUERIDAS:
   [ ] Captura A: Reset exitoso con admin_identidad
   [ ] Captura B: "Acceso Denegado" con admin_storage
 
 ══════════════════════════════════════════════════════════════════════════════
-TEST 2 — DIRECTIVA DE CONTRASENA AJUSTADA / FGPP (15% rúbrica)
-Intentar contraseña de 8 chars para admin_identidad (requiere 12) → RECHAZAR
+TEST 2 — DIRECTIVA DE CONTRASENA AJUSTADA / FGPP (15% rubrica)
+Intentar contrasena de 8 chars para admin_identidad (requiere 12) → RECHAZAR
 ══════════════════════════════════════════════════════════════════════════════
 
 PREPARACION:
-  En el menú P09 → Módulo 2 → opción 7 (Ejecutar TODO)
+  En el menu P09 → Modulo 2 → opcion 7 (Ejecutar TODO)
 
 PRUEBA:
-  Vuelve a iniciar sesión como Administrador del dominio.
-  
+  Vuelve a iniciar sesion como REDES\Administrador.
+
   Desde PowerShell:
     Set-ADAccountPassword -Identity admin_identidad `
         -Reset -NewPassword (ConvertTo-SecureString "Test1234" -AsPlainText -Force)
@@ -93,27 +102,30 @@ PRUEBA:
 
   Resultado esperado:
     "The password does not meet the length, complexity, or history requirement"
-    o bien: "La contraseña no cumple los requisitos de complejidad"
+    o bien: "La contrasena no cumple los requisitos de complejidad"
 
   Verificar FGPP efectiva:
     Get-ADUserResultantPasswordPolicy -Identity admin_identidad
     # MinPasswordLength debe mostrar: 12
 
+  Ver todas las FGPP del dominio:
+    Get-ADFineGrainedPasswordPolicy -Filter * |
+        Sort-Object Precedence |
+        Format-Table Name, MinPasswordLength, LockoutThreshold, Precedence -AutoSize
+
 EVIDENCIAS REQUERIDAS:
-  [ ] Captura: Error de contraseña al intentar 8 caracteres
+  [ ] Captura: Error de contrasena al intentar 8 caracteres
   [ ] Captura: Resultado de Get-ADUserResultantPasswordPolicy mostrando 12
 
 ══════════════════════════════════════════════════════════════════════════════
-TEST 3 — FLUJO MFA (40% rúbrica — la mas importante)
-El login debe solicitar código TOTP después de la contraseña
+TEST 3 — FLUJO MFA (40% rubrica — la mas importante)
+El login debe solicitar codigo TOTP despues de la contrasena
 ══════════════════════════════════════════════════════════════════════════════
 
 PREPARACION:
-  Esta parte es manual. Sigue la guía del Módulo 4 opción 1.
-  
-  Opción recomendada para el laboratorio: MultiOTP (gratuito)
+  Seguir los pasos de la Fase 5 de Guia_Practica_09.md
 
-  PASO 3.1 — Instalar MultiOTP Credential Provider:
+  PASO 3.1 — Instalar MultiOTP:
     a) Descarga de: https://www.multiotp.net/
        Archivo: multiotp-windows-credential-provider-*.zip
     b) Extrae en C:\multiotp\
@@ -122,45 +134,55 @@ PREPARACION:
        copy C:\multiotp\MultiotpCredentialProvider.ini C:\Windows\System32\
     d) Registra el Credential Provider:
        regsvr32 C:\Windows\System32\MultiotpCredentialProvider.dll
-    e) Configura el secreto compartido en C:\Windows\System32\MultiotpCredentialProvider.ini
+    e) Verifica: aparece cuadro "DllRegisterServer tuvo exito"
 
-  PASO 3.2 — Configurar Google Authenticator:
-    a) En tu celular, abre Google Authenticator
-    b) Pulsa "+" → "Ingresar clave de configuración"
-    c) Nombre: Lab.local MFA
-    d) Clave: el secreto Base32 configurado en MultiOTP
-    e) Tipo: Basada en tiempo (TOTP)
+  PASO 3.2 — Crear usuario MFA en MultiOTP:
+    cd C:\multiotp
+    .\multiotp.exe -create Administrador TOTP sha1 1234567890abcdef 6
+    .\multiotp.exe -qrcode Administrador C:\multiotp\qr_admin.png
+    Start-Process C:\multiotp\qr_admin.png
 
-  PASO 3.3 — Verificar flujo en el servidor:
+  PASO 3.3 — Configurar Google Authenticator en el celular:
+    a) Abre Google Authenticator
+    b) Pulsa "+" → "Escanear codigo QR"
+    c) Apunta al QR mostrado en pantalla
+    d) Aparece: "redes.local - Administrador" con codigo de 6 digitos
+    e) El codigo cambia cada 30 segundos
+
+  PASO 3.4 — Verificar flujo en el servidor:
     a) Bloquea la pantalla del servidor (Win+L)
-    b) Ingresa: usuario=Administrador, contraseña=tu_contraseña
-    c) DEBE aparecer un campo adicional pidiendo el código de 6 dígitos
-    d) Ingresa el código de Google Authenticator
+    b) Ingresa: usuario=Administrador, contrasena=Admin@Redes2026!
+    c) DEBE aparecer un campo adicional pidiendo el codigo de 6 digitos
+    d) Ingresa el codigo de Google Authenticator
     e) El acceso debe concederse
 
 EVIDENCIAS REQUERIDAS:
   [ ] Captura: pantalla de login mostrando campo adicional TOTP
-  [ ] Foto del celular con Google Authenticator mostrando el código de 6 dígitos
-  [ ] Captura: acceso concedido después del TOTP correcto
+  [ ] Foto del celular con Google Authenticator mostrando el codigo de 6 digitos
+  [ ] Captura: acceso concedido despues del TOTP correcto
 
 ══════════════════════════════════════════════════════════════════════════════
-TEST 4 — BLOQUEO POR MFA FALLIDO (parte del 40% rúbrica)
-3 códigos incorrectos → cuenta bloqueada 30 minutos
+TEST 4 — BLOQUEO POR MFA FALLIDO (parte del 40% rubrica)
+3 codigos incorrectos → cuenta bloqueada 30 minutos
 ══════════════════════════════════════════════════════════════════════════════
 
 PREPARACION:
-  En el menú P09 → Módulo 4 → opción 2 y opción 3
-  Esto configura: 3 intentos → bloqueo 30 minutos
+  En el menu P09 → Modulo 4 → opcion 2 y opcion 3
+  Esto configura: 3 intentos → bloqueo 30 minutos (FGPP PSO-MFA-Lockout-P09)
+
+  Verificar configuracion:
+    net accounts
+    # Debe mostrar: Lockout threshold: 3 / Lockout duration: 30
 
 PRUEBA:
-  a) En el login del servidor (o desde Windows 10 intentando conectar)
-  b) Ingresa credenciales válidas (usuario + contraseña correctos)
+  a) En el login del servidor (o desde Windows 10)
+  b) Ingresa credenciales validas (usuario + contrasena correctos)
   c) En el campo TOTP, ingresa "000000" (incorrecto) → intento 1
   d) Vuelve a intentar → ingresa "111111" → intento 2
   e) Vuelve a intentar → ingresa "222222" → intento 3
   f) La cuenta debe quedar bloqueada
 
-  Verificar bloqueo desde otro equipo (como Administrador):
+  Verificar bloqueo (como Administrador desde otro equipo o sesion):
     Search-ADAccount -LockedOut | Select Name, SamAccountName, LockedOut
     # Debe aparecer la cuenta bloqueada
 
@@ -169,50 +191,89 @@ PRUEBA:
     b) Busca el usuario
     c) Propiedades → Account → "Account is locked out" debe estar marcado
 
-  Desbloquear después de la prueba (Módulo 4 opción 7):
-    Unlock-ADAccount -Identity <usuario>
+  Desbloquear despues de la prueba:
+    Unlock-ADAccount -Identity Administrador
 
 EVIDENCIAS REQUERIDAS:
   [ ] Captura: mensaje de "cuenta bloqueada" en la pantalla de login
   [ ] Captura: usuario marcado como "Locked" en ADUC o en PowerShell
 
 ══════════════════════════════════════════════════════════════════════════════
-TEST 5 — REPORTE DE AUDITORIA AUTOMATIZADO (15% rúbrica)
-Script extrae últimos 10 intentos de acceso denegado → archivo TXT/CSV
+TEST 5 — REPORTE DE AUDITORIA AUTOMATIZADO (15% rubrica)
+Script extrae ultimos 10 intentos de acceso denegado → archivo TXT/CSV
 ══════════════════════════════════════════════════════════════════════════════
 
 PREPARACION:
-  Primero genera algunos eventos: repite intentos fallidos de login.
-  Luego habilita auditoría: Módulo 2 → opción 4.
+  Primero genera algunos eventos: repite intentos fallidos de login desde
+  Windows 10 (WIN10-CLI) o Linux Mint (MINT-CLI).
+  Luego habilita auditoria: Modulo 2 → opcion 4.
 
 PRUEBA:
-  En el menú P09 → Módulo 3 → opción 4 (Reporte completo)
+  En el menu P09 → Modulo 3 → opcion 4 (Reporte completo)
 
-  El script genera automáticamente:
+  El script genera automaticamente:
     C:\P09-Auditoria\REPORTE_COMPLETO_P09_YYYYMMDD_HHMMSS.txt
     C:\P09-Auditoria\reporte_4625_YYYYMMDD_HHMMSS.csv
 
   Verificar manualmente:
     Get-WinEvent -FilterHashtable @{LogName="Security"; Id=4625} -MaxEvents 10 |
+        Select-Object TimeCreated, @{N="Usuario";E={$_.Properties[5].Value}},
+                      @{N="IP";E={$_.Properties[19].Value}} |
+        Format-Table -AutoSize
+
+    # Exportar a CSV
+    Get-WinEvent -FilterHashtable @{LogName="Security"; Id=4625} -MaxEvents 10 |
         Select-Object TimeCreated, Id, Message |
         Export-Csv C:\P09-Auditoria\manual_test5.csv -NoTypeInformation
-    
-    # Abrir el CSV para verificar que tiene datos
 
 EVIDENCIAS REQUERIDAS:
   [ ] Captura: PowerShell ejecutando el script con resultados visibles
-  [ ] Adjuntar en el reporte: el archivo TXT o CSV generado (abrir y pegar contenido)
+  [ ] Adjuntar en el reporte: el archivo TXT o CSV generado
+
+══════════════════════════════════════════════════════════════════════════════
+TEST 6 — CLIENTE LINUX MINT UNIDO AL DOMINIO (verificacion de integracion)
+══════════════════════════════════════════════════════════════════════════════
+
+PREPARACION:
+  Seguir Fase 7 de Guia_Practica_09.md
+
+PRUEBA EN LINUX MINT (terminal):
+  a) Verificar union al dominio:
+     realm list
+     # Debe mostrar redes.local como configured: kerberos-member
+
+  b) Verificar que ve usuarios del dominio:
+     id jgarcia
+     # Resultado: uid=...(jgarcia) gid=...(domain users) ...
+
+  c) Iniciar sesion con usuario del dominio:
+     # En la pantalla de login de Linux Mint o via SSH:
+     ssh jgarcia@192.168.56.20
+     # Usuario: jgarcia / Contrasena: Usuario@2026!
+
+  d) Verificar ticket Kerberos activo:
+     klist
+     # Debe mostrar: Credentials cache: ... Principal: jgarcia@REDES.LOCAL
+
+  e) Si MFA esta configurado en Linux Mint (google-authenticator):
+     # Al conectar por SSH se pedira primero contrasena, luego codigo TOTP
+     # Evidencia: captura del prompt solicitando "Verification code:"
+
+EVIDENCIAS REQUERIDAS:
+  [ ] Captura: salida de "realm list" mostrando redes.local como miembro
+  [ ] Captura: salida de "id jgarcia" con grupos del dominio
+  [ ] Captura: login exitoso en Linux Mint con usuario de dominio
 
 ══════════════════════════════════════════════════════════════════════════════
 VERIFICACION AUTOMATICA COMPLETA (ejecutar al final)
 ══════════════════════════════════════════════════════════════════════════════
 
-  En el menú P09 → Módulo 5 → opción 6 (Ejecutar TODOS los tests)
+  En el menu P09 → Modulo 5 → opcion 6 (Ejecutar TODOS los tests)
 
-  Esto genera automáticamente:
+  Esto genera automaticamente:
     C:\P09-Auditoria\RESUMEN_TESTS_P09_*.txt
 
-  El resumen muestra PASS/FAIL para cada punto de la rúbrica.
+  El resumen muestra PASS/FAIL para cada punto de la rubrica.
 
 ══════════════════════════════════════════════════════════════════════════════
 RESUMEN DE EVIDENCIAS PARA EL REPORTE TECNICO
@@ -220,57 +281,66 @@ RESUMEN DE EVIDENCIAS PARA EL REPORTE TECNICO
 
 Carpeta sugerida para organizar capturas: C:\P09\evidencias\
 
-  evidencia_test1a_reset_exitoso.png       (Rol 1 OK)
-  evidencia_test1b_acceso_denegado.png     (Rol 2 bloqueado)
-  evidencia_test2_fgpp_error.png           (contraseña 8 chars rechazada)
+  evidencia_test1a_reset_exitoso.png       (Rol 1 OK - admin_identidad)
+  evidencia_test1b_acceso_denegado.png     (Rol 2 bloqueado - admin_storage)
+  evidencia_test2_fgpp_error.png           (contrasena 8 chars rechazada)
   evidencia_test2_fgpp_resultante.png      (Get-ADUserResultantPasswordPolicy)
   evidencia_test3_login_totp.png           (pantalla login con campo TOTP)
-  evidencia_test3_google_auth.jpg          (foto celular con código)
-  evidencia_test4_cuenta_bloqueada.png     (cuenta locked)
-  evidencia_test4_aduc_locked.png          (ADUC mostrando bloqueada)
-  evidencia_test5_script_output.png        (PowerShell con resultados)
-  evidencia_test5_reporte.txt              (archivo generado adjunto)
+  evidencia_test3_google_auth.jpg          (foto celular con codigo 6 digitos)
+  evidencia_test3_acceso_concedido.png     (login exitoso con MFA)
+  evidencia_test4_cuenta_bloqueada.png     (cuenta locked en pantalla)
+  evidencia_test4_aduc_locked.png          (ADUC mostrando cuenta bloqueada)
+  evidencia_test5_script_output.png        (PowerShell con resultados reporte)
+  evidencia_test5_reporte.csv             (archivo CSV generado adjunto)
+  evidencia_test6_realm_list.png           (Linux Mint - realm list)
+  evidencia_test6_id_jgarcia.png           (Linux Mint - id jgarcia)
+  evidencia_test6_login_mint.png           (Login en Linux Mint con dominio)
 
 ══════════════════════════════════════════════════════════════════════════════
-DIAGRAMA DE FLUJO MFA (para el reporte técnico — sección Documentación 15%)
+DIAGRAMA DE FLUJO MFA (para el reporte tecnico)
 ══════════════════════════════════════════════════════════════════════════════
 
-  [Usuario escribe usuario + contraseña]
+  [Usuario escribe REDES\usuario + contrasena]
            │
            ▼
-  [LSASS verifica credenciales contra AD]
-           │ credenciales válidas
+  [LSASS verifica credenciales contra AD (redes.local)]
+           │ credenciales validas
            ▼
-  [Credential Provider (MultiOTP/WinOTP) intercepta el login]
+  [Credential Provider (MultiOTP) intercepta el login]
            │
            ▼
-  [Pantalla solicita código TOTP de 6 dígitos]
+  [Pantalla solicita codigo TOTP de 6 digitos]
            │
-           ├─── Código correcto ──────────────────────────────────────────┐
-           │                                                              ▼
-           │                                              [Acceso CONCEDIDO]
+           ├─── Codigo correcto ────────────────────────────────────────────┐
+           │                                                               ▼
+           │                                               [Acceso CONCEDIDO]
            │
-           ├─── Código incorrecto (intento 1/3) ──────────────────────────┐
-           │                                                              ▼
-           │                                              [Vuelve a solicitar]
+           ├─── Codigo incorrecto (intento 1/3) ────────────────────────────┐
+           │                                                               ▼
+           │                                               [Vuelve a solicitar]
            │
-           ├─── Código incorrecto (intento 2/3) ──────────────────────────┐
-           │                                                              ▼
-           │                                              [Vuelve a solicitar]
+           ├─── Codigo incorrecto (intento 2/3) ────────────────────────────┐
+           │                                                               ▼
+           │                                               [Vuelve a solicitar]
            │
-           └─── Código incorrecto (intento 3/3) ──────────────────────────┐
-                                                                         ▼
-                                                    [Cuenta BLOQUEADA 30 minutos]
-                                                    [Event ID 4740 → Security Log]
-                                                    [Requiere Administrador para desbloquear]
+           └─── Codigo incorrecto (intento 3/3) ────────────────────────────┐
+                                                                          ▼
+                                                     [Cuenta BLOQUEADA 30 minutos]
+                                                     [Event ID 4740 → Security Log]
+                                                     [Admin: Unlock-ADAccount]
 
-  Validación TOTP:
-    Secreto Base32 compartido + timestamp (ventana ±30 seg) → HMAC-SHA1 → 6 dígitos
-    Este algoritmo es compatible con Google Authenticator (RFC 6238)
+  Validacion TOTP:
+    Secreto Base32 compartido + timestamp (ventana +-30 seg) → HMAC-SHA1 → 6 digitos
+    Algoritmo RFC 6238 — compatible con Google Authenticator y Microsoft Authenticator
 
 ══════════════════════════════════════════════════════════════════════════════
 COMANDOS DE REFERENCIA RAPIDA
 ══════════════════════════════════════════════════════════════════════════════
+
+=== WINDOWS SERVER (PowerShell como Admin) ===
+
+# Ver usuarios del dominio
+Get-ADUser -Filter * | Select-Object Name, SamAccountName, Enabled
 
 # Ver usuarios bloqueados
 Search-ADAccount -LockedOut | Select Name, SamAccountName
@@ -281,16 +351,65 @@ Unlock-ADAccount -Identity <usuario>
 # Ver FGPP aplicada a un usuario
 Get-ADUserResultantPasswordPolicy -Identity admin_identidad
 
+# Ver todas las FGPP del dominio
+Get-ADFineGrainedPasswordPolicy -Filter * | Sort Precedence | Format-Table Name, MinPasswordLength, LockoutThreshold, Precedence
+
 # Ver intentos fallidos de login
 Get-WinEvent -FilterHashtable @{LogName="Security"; Id=4625} -MaxEvents 10
 
 # Ver eventos de bloqueo
 Get-WinEvent -FilterHashtable @{LogName="Security"; Id=4740} -MaxEvents 10
 
-# Estado de auditoría
+# Estado de auditoria
 auditpol /get /subcategory:"Logon"
 
-# Verificar FGPP configuradas
-Get-ADFineGrainedPasswordPolicy -Filter * | Sort Precedence | Format-Table Name, MinPasswordLength, LockoutThreshold, Precedence
+# Politica de bloqueo dominio
+net accounts
+
+# Verificar Credential Provider MFA
+Get-ChildItem "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\Credential Providers"
+
+=== LINUX MINT (terminal) ===
+
+# Ver si esta unido al dominio
+realm list
+
+# Ver informacion de usuario del dominio
+id jgarcia
+
+# Buscar usuarios del dominio
+getent passwd | grep -v nologin | tail -20
+
+# Ver tickets Kerberos activos
+klist
+
+# Obtener ticket Kerberos
+kinit jgarcia@REDES.LOCAL
+
+# Estado de SSSD
+sudo systemctl status sssd
+
+# Ver logs de SSSD (para debug)
+sudo journalctl -u sssd -n 50
+
+# Reiniciar SSSD si hay problemas
+sudo systemctl restart sssd
+
+# Limpiar cache SSSD
+sudo sss_cache -E
+
+══════════════════════════════════════════════════════════════════════════════
+RUBRICA DE EVALUACION
+══════════════════════════════════════════════════════════════════════════════
+
+  Test 1 — Delegacion RBAC (admin_identidad vs admin_storage)    30%
+  Test 2 — FGPP contrasena minimo 12 caracteres para admins      15%
+  Test 3 — Flujo MFA con TOTP (campo adicional en login)         40%
+  Test 4 — Bloqueo por MFA fallido (3 intentos / 30 min)        (incluido en 40%)
+  Test 5 — Reporte de auditoria automatizado TXT/CSV             15%
+  Test 6 — Linux Mint unido al dominio redes.local               BONUS
+
+  TOTAL AUTOMATIZABLE: 60%   (Tests 1, 2, 4, 5)
+  REQUIERE CAPTURA MANUAL: 40%   (Test 3 — MFA visual)
 
 ══════════════════════════════════════════════════════════════════════════════
